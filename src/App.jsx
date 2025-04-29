@@ -1,68 +1,75 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from './contexts/AuthContext';
 import LoginPage from './pages/LoginPage';
 import ReceptionistDashboard from './pages/ReceptionistDashboard';
 import TechnicianDashboard from './pages/TechnicianDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import InventoryPage from './pages/InventoryPage';
+import CustomerPage from './pages/CustomerPage';
+import MainLayout from './layouts/MainLayout';
+import SettingsPage from './pages/SettingsPage';
+import ProtectedRoute from './components/ProtectedRoute';
+import ProfileSettings from './pages/settings/ProfileSettings';
+import AppearanceSettings from './pages/settings/AppearanceSettings';
+import SystemSettingsTab from './components/SystemSettingsTab';
 
-// Komponen Placeholder untuk Protected Route
-// TODO: Implementasikan logika otentikasi yang sebenarnya di sini
-const ProtectedRoute = ({ children }) => {
-  const isAuthenticated = true; // Placeholder: anggap pengguna sudah login
-  // Nanti, cek status login dari context atau state management lainnya
-  // const { currentUser } = useAuth(); // Contoh jika menggunakan AuthContext
+// Komponen Protected Route - sekarang hanya cek sesi
+const RequireAuth = () => {
+  const { session } = useAuth(); // Hanya ambil session
 
-  if (!isAuthenticated) {
-    // Jika tidak login, redirect ke halaman login
-    return <Navigate to="/login" replace />;
-  }
-
-  // Jika sudah login, render children (komponen yang diproteksi)
-  return children;
+  // Langsung cek session. Jika ada, render Outlet. Jika tidak, redirect.
+  return session ? <Outlet /> : <Navigate to="/login" replace />;
 };
 
 function App() {
+  const { user } = useAuth(); // Get user from auth context
+  const userRole = user?.role; // Safely access the role
+
   return (
     <Router>
       <Routes>
+        {/* Rute Publik (Login) */}
         <Route path="/login" element={<LoginPage />} />
 
-        {/* Rute yang Diproteksi */}
-        <Route
-          path="/receptionist"
-          element={
-            <ProtectedRoute>
-              <ReceptionistDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/technician"
-          element={
-            <ProtectedRoute>
-              <TechnicianDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute>
-              <AdminDashboard />
-            </ProtectedRoute>
-          }
-        />
-         <Route
-          path="/inventory"
-          element={
-            <ProtectedRoute> {/* Sesuaikan proteksi jika perlu */}
-              <InventoryPage />
-            </ProtectedRoute>
-          }
-        />
+        {/* Rute yang Diproteksi (Menggunakan Layout Utama) */}
+        {/* 2. Buat route wrapper untuk RequireAuth (sebelumnya ProtectedRoute lokal) */}
+        <Route element={<RequireAuth />}>
+           {/* 3. Buat route wrapper untuk MainLayout */}
+           <Route element={<MainLayout />}>
+              {/* Definisikan route anak di sini, relatif terhadap MainLayout */}
+              <Route path="/receptionist" element={<ProtectedRoute allowedRoles={['admin', 'receptionist']} element={<ReceptionistDashboard />} />} />
+              <Route path="/technician" element={<ProtectedRoute allowedRoles={['admin', 'technician']} element={<TechnicianDashboard />} />} />
+              <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin']} element={<AdminDashboard />} />} />
+              <Route path="/inventory" element={<ProtectedRoute allowedRoles={['admin', 'receptionist', 'technician']} element={<InventoryPage />} />} />
+              <Route path="/customers" element={<ProtectedRoute allowedRoles={['admin', 'receptionist']} element={<CustomerPage />} />} />
+              {/* <Route path="/orders/:orderId" element={<ProtectedRoute allowedRoles={['admin', 'receptionist', 'technician']} element={<OrderDetailPage />} />} /> */}
+              
+              {/* Settings Route with Nested Routes */}
+              <Route 
+                  path="/settings" 
+                  element={
+                      <ProtectedRoute 
+                          allowedRoles={['admin', 'receptionist', 'technician']} 
+                          element={<SettingsPage />} 
+                      />
+                  }
+              >
+                  {/* Nested routes for settings tabs */}
+                  <Route index element={<ProfileSettings />} /> {/* Default tab */} 
+                  <Route path="profile" element={<ProfileSettings />} />
+                  <Route path="appearance" element={<AppearanceSettings />} />
+              </Route>
+              
+              {/* Redirect default jika sudah login tapi path tidak cocok */}
+              {/* Navigasi ke dashboard berdasarkan role */}
+              <Route path="/" element={<Navigate to={ userRole === 'technician' ? '/technician' : '/receptionist'} replace />} />
+              {/* Fallback untuk path kosong jika role tidak jelas (misal, saat loading) */}
+              <Route index element={<Navigate to="/receptionist" replace />} />
+           </Route>
+        </Route>
 
-        {/* Redirect ke login jika path tidak cocok atau akses root */}
+        {/* Redirect akhir jika tidak cocok sama sekali (termasuk jika tidak login dan akses path aneh) */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>

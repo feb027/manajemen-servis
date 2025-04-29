@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 
 // TODO: Ganti dengan URL dan Kunci Anon proyek Supabase Anda
-const supabaseUrl = 'YOUR_SUPABASE_URL'; // Ambil dari Supabase Project Settings > API
-const supabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY'; // Ambil dari Supabase Project Settings > API
+const supabaseUrl = '***REMOVED***'; // Ambil dari Supabase Project Settings > API
+const supabaseAnonKey = '***REMOVED***'; // Ambil dari Supabase Project Settings > API
 
 // Buat dan ekspor client Supabase
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
