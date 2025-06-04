@@ -7,6 +7,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependency directories
+
 node_modules
 dist
 dist-ssr
@@ -22,3 +24,35 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Build output
+build
+coverage
+# Temporary files
+temp
+tmp
+.cache
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+# Miscellaneous
+*.tgz
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.bak
+*.tmp
+*.swp
+*.pid
+*.seed
+*.pid.lock
+*.log.*
+*.pid.lock.*
+*.orig
+*.rej
