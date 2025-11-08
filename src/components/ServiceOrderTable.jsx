@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { FiArrowUp, FiArrowDown, FiEye, FiUserPlus, FiRefreshCw, FiEdit2, FiDollarSign, FiTrash2 } from 'react-icons/fi';
 import { LuChevronsUpDown } from "react-icons/lu";
+import StatusBadge from './StatusBadge'; // Import StatusBadge component
 
 function ServiceOrderTable({ orders, technicians = [], onRowClick, sortConfig, requestSort, onAssignClick, onStatusUpdateClick, onEditClick, onDeleteClick, selectedOrderIds, onSelectRow, onSelectAll }) {
 
@@ -30,29 +31,6 @@ function ServiceOrderTable({ orders, technicians = [], onRowClick, sortConfig, r
       console.error("Error formatting date:", error);
       return dateString; // Return original string on error
     }
-  };
-
-  // Helper function for status badges (could be moved to a shared util)
-  const getStatusBadge = (status) => {
-    const currentStatus = status || 'Baru'; // Default to 'Baru' if null/undefined
-    let colorClass = 'bg-gray-100';
-    let textClass = 'text-gray-800';
-
-    switch (currentStatus.toLowerCase()) {
-      case 'baru':
-        colorClass = 'bg-blue-100'; textClass = 'text-blue-800'; break;
-      // Change 'dikerjakan' to 'diproses'
-      case 'diproses':
-        colorClass = 'bg-yellow-100'; textClass = 'text-yellow-800'; break;
-      // Add 'menunggu spare part'
-      case 'menunggu spare part':
-        colorClass = 'bg-orange-100'; textClass = 'text-orange-800'; break;
-      case 'selesai':
-        colorClass = 'bg-green-100'; textClass = 'text-green-800'; break;
-      case 'dibatalkan':
-        colorClass = 'bg-red-100'; textClass = 'text-red-800'; break;
-    }
-    return <span className={`px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full whitespace-nowrap ${colorClass} ${textClass}`}>{currentStatus}</span>;
   };
 
   // Updated sort icon logic
@@ -204,7 +182,7 @@ function ServiceOrderTable({ orders, technicians = [], onRowClick, sortConfig, r
                   {technicianName}
                 </td>
                 <td className="py-3 px-4 text-center">
-                  {getStatusBadge(order.status)}
+                  <StatusBadge status={order.status || 'Baru'} />
                 </td>
                 <td className="py-3 px-4 text-right whitespace-nowrap font-medium text-gray-700">
                     {formatCurrency(order.cost)}

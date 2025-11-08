@@ -1,4 +1,4 @@
-import React, { useMemo, useState, Fragment } from 'react';
+import React, { useMemo, useState, Fragment, useEffect } from 'react';
 import { Menu, Transition } from '@headlessui/react';
 import { FiClipboard, FiUsers, FiTool, FiUserCheck, FiDownload, FiChevronDown } from 'react-icons/fi';
 import { 
@@ -20,6 +20,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { applyPlugin } from 'jspdf-autotable';
+import { supabase } from '../supabase/supabaseClient';
 
 // Explicitly apply the autotable plugin to jsPDF
 applyPlugin(jsPDF);
@@ -58,14 +59,18 @@ const isDateInRange = (dateString, range) => {
   return date >= startDate;
 };
 
-// Define colors for charts
-const STATUS_COLORS = {
-    'Baru': '#3B82F6', // Blue
-    'Diproses': '#F59E0B', // Amber
-    'Menunggu Spare Part': '#F97316', // Orange
-    'Selesai': '#10B981', // Emerald
-    'Dibatalkan': '#EF4444', // Red
-    'Default': '#6B7280' // Gray for others
+// Define colors for charts - color mapping from database
+const COLOR_MAP = {
+  blue: '#3B82F6',
+  yellow: '#FACC15',
+  orange: '#F97316',
+  green: '#22C55E',
+  red: '#EF4444',
+  purple: '#A855F7',
+  pink: '#EC4899',
+  indigo: '#6366F1',
+  teal: '#14B8A6',
+  gray: '#6B7280',
 };
 
 const TECHNICIAN_BAR_COLOR = '#8884d8'; // Example color for technician bars
@@ -85,6 +90,41 @@ const formatDateLabel = (dateStr, range) => {
 
 function AnalyticsTab({ orders = [], users = [] }) {
   const [selectedRange, setSelectedRange] = useState('allTime'); // Default to 'allTime'
+  const [statusColors, setStatusColors] = useState({});
+
+  // Fetch status colors from database
+  useEffect(() => {
+    const fetchStatusColors = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('service_statuses')
+          .select('name, color')
+          .eq('is_active', true);
+
+        if (error) throw error;
+
+        // Build color mapping from database
+        const colors = {};
+        data.forEach(status => {
+          colors[status.name] = COLOR_MAP[status.color] || COLOR_MAP.gray;
+        });
+        
+        setStatusColors(colors);
+      } catch (error) {
+        console.error('Error fetching status colors:', error);
+        // Fallback to default colors
+        setStatusColors({
+          'Baru': COLOR_MAP.blue,
+          'Diproses': COLOR_MAP.yellow,
+          'Menunggu Spare Part': COLOR_MAP.orange,
+          'Selesai': COLOR_MAP.green,
+          'Dibatalkan': COLOR_MAP.red,
+        });
+      }
+    };
+
+    fetchStatusColors();
+  }, []);
 
   // Get filtered orders based on range (used for charts and export)
   const filteredOrders = useMemo(() => 
@@ -153,23 +193,23 @@ function AnalyticsTab({ orders = [], users = [] }) {
       technicianPerformanceData,
       orderTrendData 
     };
-  // Depend only on filteredOrders and users for chart calculations
-  }, [filteredOrders, users]); 
+  // Depend on filteredOrders, users, and selectedRange for chart calculations
+  }, [filteredOrders, users, selectedRange]); 
 
   // --- Helper Function to Prepare Data for Export --- 
   const prepareDataForExport = () => {
       return filteredOrders.map(order => ({
           'ID Order': order.id,
           'Tanggal Masuk': order.created_at ? new Date(order.created_at).toLocaleDateString('id-ID') : '',
-          'Nama Pelanggan': order.customers?.name || '-',
-          'Kontak Pelanggan': order.customers?.phone || '-',
+          'Nama Pelanggan': order.customer_name || '-',
+          'Kontak Pelanggan': order.customer_contact || '-',
           'Tipe Perangkat': order.device_type || '-',
           'Nomor Seri': order.serial_number || '-',
-          'Deskripsi Masalah': order.problem_description || '-',
+          'Deskripsi Masalah': order.customer_complaint || '-',
           'Teknisi Ditugaskan': users.find(u => u.id === order.assigned_technician_id)?.full_name || 'Belum Ditugaskan',
           'Status': order.status || '-',
-          'Estimasi Selesai': order.estimated_completion_date ? new Date(order.estimated_completion_date).toLocaleDateString('id-ID') : '',
-          'Catatan Teknisi': order.technician_notes || ''
+          'Estimasi Selesai': order.estimated_completion_time ? new Date(order.estimated_completion_time).toLocaleDateString('id-ID') : '-',
+          'Catatan Teknisi': order.notes || '-'
       }));
   };
 
@@ -193,27 +233,264 @@ function AnalyticsTab({ orders = [], users = [] }) {
     XLSX.writeFile(workbook, `laporan_servis_${selectedRange}_${timestamp}.xlsx`);
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (filteredOrders.length === 0) return alert("Tidak ada data untuk diekspor.");
-    const dataToExport = prepareDataForExport();
+    
+    // Fetch company profile
+    const { data: companyData, error: companyError } = await supabase
+      .from('company_profile')
+      .select('*')
+      .single();
+    
+    if (companyError) {
+      console.error('Error fetching company profile:', companyError);
+    }
     
     // Instance created AFTER plugin is applied
     const doc = new jsPDF();
-
-    const tableColumn = Object.keys(dataToExport[0]);
-    const tableRows = dataToExport.map(item => Object.values(item));
-
-    // This should now work
-    doc.autoTable({
-        head: [tableColumn],
-        body: tableRows,
-        startY: 20, 
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [22, 160, 133] }, 
-        margin: { top: 15 }
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const contentWidth = pageWidth - (margin * 2);
+    let currentY = 20;
+    
+    // Helper function to check if we need a new page
+    const checkPageBreak = (requiredSpace) => {
+      if (currentY + requiredSpace > pageHeight - 20) {
+        doc.addPage();
+        currentY = 20;
+        return true;
+      }
+      return false;
+    };
+    
+    // Helper to add footer
+    const addFooter = () => {
+      const pageCount = doc.internal.getNumberOfPages();
+      const currentPage = doc.internal.getCurrentPageInfo().pageNumber;
+      
+      doc.setFontSize(8);
+      doc.setTextColor(107, 114, 128);
+      doc.text(
+        `Halaman ${currentPage} dari ${pageCount}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: 'center' }
+      );
+      
+      if (companyData?.company_name) {
+        doc.text(companyData.company_name, margin, pageHeight - 10);
+      }
+    };
+    
+    // Company Header Section
+    if (companyData) {
+      doc.setFontSize(20);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(30, 58, 138);
+      doc.text(companyData.company_name || 'Perusahaan Servis', pageWidth / 2, currentY, { align: 'center' });
+      currentY += 8;
+      
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      
+      const details = [];
+      if (companyData.address) details.push(companyData.address);
+      if (companyData.phone_number) details.push(`Tel: ${companyData.phone_number}`);
+      if (companyData.email) details.push(`Email: ${companyData.email}`);
+      if (companyData.website) details.push(`Web: ${companyData.website}`);
+      
+      details.forEach(detail => {
+        doc.text(detail, pageWidth / 2, currentY, { align: 'center' });
+        currentY += 4;
+      });
+      
+      currentY += 3;
+    }
+    
+    // Separator Line
+    doc.setDrawColor(209, 213, 219);
+    doc.setLineWidth(0.5);
+    doc.line(margin, currentY, pageWidth - margin, currentY);
+    currentY += 8;
+    
+    // Report Title
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(17, 24, 39);
+    const rangeLabel = {
+      'last7days': '7 Hari Terakhir',
+      'last30days': '30 Hari Terakhir',
+      'thisMonth': 'Bulan Ini',
+      'allTime': 'Semua Waktu'
+    }[selectedRange];
+    doc.text(`Laporan Servis - ${rangeLabel}`, pageWidth / 2, currentY, { align: 'center' });
+    currentY += 5;
+    
+    // Report Date
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(107, 114, 128);
+    const reportDate = new Date().toLocaleDateString('id-ID', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
     });
+    doc.text(`Tanggal Laporan: ${reportDate}`, pageWidth / 2, currentY, { align: 'center' });
+    currentY += 4;
+    
+    // Summary Stats
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(17, 24, 39);
+    doc.text(`Total Order: ${filteredOrders.length}`, pageWidth / 2, currentY, { align: 'center' });
+    currentY += 10;
 
-    doc.text(`Laporan Servis (${selectedRange})`, 14, 15);
+    // Loop through each order and create a card
+    filteredOrders.forEach((order, index) => {
+      const cardHeight = 55; // Approximate height for each card
+      checkPageBreak(cardHeight);
+      
+      const cardY = currentY;
+      
+      // Card background with border
+      doc.setFillColor(248, 250, 252); // Light gray background
+      doc.setDrawColor(209, 213, 219); // Gray border
+      doc.setLineWidth(0.3);
+      doc.roundedRect(margin, cardY, contentWidth, cardHeight, 2, 2, 'FD');
+      
+      let innerY = cardY + 6;
+      
+      // Order Number Header
+      doc.setFontSize(11);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(30, 58, 138); // Blue
+      doc.text(`Order #${index + 1}`, margin + 4, innerY);
+      
+      // Status Badge (right side)
+      const status = order.status || '-';
+      const statusWidth = doc.getTextWidth(status) + 8;
+      const statusX = pageWidth - margin - statusWidth - 4;
+      
+      // Status background color based on status
+      const statusColors = {
+        'Baru': [59, 130, 246],
+        'Diproses': [250, 204, 21],
+        'Menunggu Spare Part': [249, 115, 22],
+        'Selesai': [34, 197, 94],
+        'Dibatalkan': [239, 68, 68]
+      };
+      const bgColor = statusColors[status] || [107, 114, 128];
+      
+      doc.setFillColor(...bgColor);
+      doc.roundedRect(statusX, innerY - 4, statusWidth, 6, 1, 1, 'F');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text(status, statusX + 4, innerY);
+      
+      innerY += 6;
+      
+      // Separator line
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.1);
+      doc.line(margin + 4, innerY, pageWidth - margin - 4, innerY);
+      innerY += 5;
+      
+      // Order details in two columns
+      const col1X = margin + 4;
+      const col2X = pageWidth / 2 + 2;
+      const lineHeight = 4.5;
+      
+      doc.setFontSize(9);
+      
+      // Column 1
+      // Tanggal Masuk
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Tanggal:', col1X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      const tanggal = order.created_at ? new Date(order.created_at).toLocaleDateString('id-ID') : '-';
+      doc.text(tanggal, col1X + 20, innerY);
+      
+      // Pelanggan
+      innerY += lineHeight;
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Pelanggan:', col1X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      const customerName = order.customer_name || '-';
+      const maxWidth = (contentWidth / 2) - 24;
+      const splitName = doc.splitTextToSize(customerName, maxWidth);
+      doc.text(splitName, col1X + 20, innerY);
+      
+      // Kontak
+      innerY += lineHeight * Math.max(1, splitName.length);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Kontak:', col1X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      doc.text(order.customer_contact || '-', col1X + 20, innerY);
+      
+      // Perangkat
+      innerY += lineHeight;
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Perangkat:', col1X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      doc.text(order.device_type || '-', col1X + 20, innerY);
+      
+      // Reset innerY for column 2
+      innerY = cardY + 17;
+      
+      // Column 2
+      // Teknisi
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Teknisi:', col2X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      const techName = users.find(u => u.id === order.assigned_technician_id)?.full_name || 'Belum Ditugaskan';
+      doc.text(techName, col2X + 20, innerY);
+      
+      // Estimasi
+      innerY += lineHeight;
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Estimasi:', col2X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      const estimasi = order.estimated_completion_time 
+        ? new Date(order.estimated_completion_time).toLocaleDateString('id-ID') 
+        : '-';
+      doc.text(estimasi, col2X + 20, innerY);
+      
+      // Keluhan (full width at bottom)
+      innerY = cardY + 35;
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(55, 65, 81);
+      doc.text('Keluhan:', col1X, innerY);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(75, 85, 99);
+      const complaint = order.customer_complaint || '-';
+      const splitComplaint = doc.splitTextToSize(complaint, contentWidth - 28);
+      doc.text(splitComplaint, col1X + 16, innerY);
+      
+      currentY += cardHeight + 4; // Add spacing between cards
+    });
+    
+    // Add footer to all pages
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      addFooter();
+    }
+
     const timestamp = new Date().toISOString().slice(0, 10);
     doc.save(`laporan_servis_${selectedRange}_${timestamp}.pdf`);
   };
@@ -362,7 +639,7 @@ function AnalyticsTab({ orders = [], users = [] }) {
                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                  >
                    {chartData.statusPieData.map((entry, index) => (
-                     <Cell key={`cell-${index}`} fill={STATUS_COLORS[entry.name] || STATUS_COLORS.Default} />
+                     <Cell key={`cell-${index}`} fill={statusColors[entry.name] || COLOR_MAP.gray} />
                    ))}
                  </Pie>
                  <Tooltip />

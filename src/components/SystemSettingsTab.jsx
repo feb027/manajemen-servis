@@ -2,31 +2,31 @@
 import React, { useState, useEffect, Fragment } from 'react';
 import {
     FiSliders, FiDatabase, FiBell, FiTool, FiSave, FiPlus, FiEdit2, FiArchive, FiPackage, FiInfo, FiX, FiAlertTriangle, FiLoader,
-    FiClipboard, FiCheckSquare // Ensure necessary icons are imported
+    FiClipboard, FiCheckSquare, FiTrash2 // Added FiTrash2 for delete modal
 } from 'react-icons/fi';
 import { supabase } from '../supabase/supabaseClient'; // Ensure Supabase is imported
 import { toast } from 'react-hot-toast'; // Import toast for feedback
-import { Popover, Transition, Switch } from '@headlessui/react' // Added Popover and Transition
+import { Popover, Transition, Switch, Dialog } from '@headlessui/react' // Added Dialog for modal
+import ConfirmationModal from './ConfirmationModal'; // Import confirmation modal
 
-// Updated initialStatuses with slightly darker badge backgrounds (e.g., bg-*-200)
-const initialStatuses = [
-  { id: 1, name: 'Baru', color: 'bg-blue-200', textColor: 'text-blue-800', is_editable: false, is_archivable: false },
-  { id: 2, name: 'Diproses', color: 'bg-yellow-200', textColor: 'text-yellow-800', is_editable: true, is_archivable: true },
-  { id: 3, name: 'Menunggu Spare Part', color: 'bg-orange-200', textColor: 'text-orange-800', is_editable: true, is_archivable: true },
-  { id: 5, name: 'Selesai', color: 'bg-green-200', textColor: 'text-green-800', is_editable: false, is_archivable: false },
-  { id: 6, name: 'Dibatalkan', color: 'bg-red-200', textColor: 'text-red-800', is_editable: false, is_archivable: false },
-  // NOTE: Fetching actual statuses from DB is the long-term solution
+// Color options for status selection
+const COLOR_OPTIONS = [
+  { value: 'blue', label: 'Biru', bgClass: 'bg-blue-200', textClass: 'text-blue-800', previewBg: 'bg-blue-500' },
+  { value: 'yellow', label: 'Kuning', bgClass: 'bg-yellow-200', textClass: 'text-yellow-800', previewBg: 'bg-yellow-500' },
+  { value: 'orange', label: 'Oranye', bgClass: 'bg-orange-200', textClass: 'text-orange-800', previewBg: 'bg-orange-500' },
+  { value: 'green', label: 'Hijau', bgClass: 'bg-green-200', textClass: 'text-green-800', previewBg: 'bg-green-500' },
+  { value: 'red', label: 'Merah', bgClass: 'bg-red-200', textClass: 'text-red-800', previewBg: 'bg-red-500' },
+  { value: 'purple', label: 'Ungu', bgClass: 'bg-purple-200', textClass: 'text-purple-800', previewBg: 'bg-purple-500' },
+  { value: 'pink', label: 'Pink', bgClass: 'bg-pink-200', textClass: 'text-pink-800', previewBg: 'bg-pink-500' },
+  { value: 'indigo', label: 'Indigo', bgClass: 'bg-indigo-200', textClass: 'text-indigo-800', previewBg: 'bg-indigo-500' },
+  { value: 'teal', label: 'Teal', bgClass: 'bg-teal-200', textClass: 'text-teal-800', previewBg: 'bg-teal-500' },
+  { value: 'gray', label: 'Abu-abu', bgClass: 'bg-gray-200', textClass: 'text-gray-800', previewBg: 'bg-gray-500' },
 ];
 
-// Update getDefaultColor if necessary to provide stronger default colors too
-const getDefaultColor = () => {
-    const colors = [
-        { color: 'bg-gray-200', textColor: 'text-gray-800' },
-        { color: 'bg-teal-200', textColor: 'text-teal-800' },
-        { color: 'bg-pink-200', textColor: 'text-pink-800' },
-        { color: 'bg-cyan-200', textColor: 'text-cyan-800' },
-    ];
-    return colors[Math.floor(Math.random() * colors.length)];
+// Helper to get color classes
+const getColorClasses = (colorValue) => {
+    const colorOption = COLOR_OPTIONS.find(c => c.value === colorValue);
+    return colorOption || COLOR_OPTIONS[COLOR_OPTIONS.length - 1]; // Default to gray
 };
 
 // Define notification types with icons
@@ -38,10 +38,22 @@ const notificationSettingTypes = [
 ];
 
 function SystemSettingsTab() {
-  const [serviceStatuses, setServiceStatuses] = useState(initialStatuses);
+  const [serviceStatuses, setServiceStatuses] = useState([]);
+  const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [editingStatusId, setEditingStatusId] = useState(null);
   const [editStatusName, setEditStatusName] = useState('');
+  const [editStatusColor, setEditStatusColor] = useState('blue');
+  
+  // Add Status Modal State
+  const [isAddStatusModalOpen, setIsAddStatusModalOpen] = useState(false);
   const [newStatusName, setNewStatusName] = useState('');
+  const [newStatusColor, setNewStatusColor] = useState('blue');
+  const [isAddingStatus, setIsAddingStatus] = useState(false);
+  
+  // Delete Status Modal State
+  const [statusToDelete, setStatusToDelete] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeletingStatus, setIsDeletingStatus] = useState(false);
   // --- Inventory Settings State ---
   const [lowStockThreshold, setLowStockThreshold] = useState(null); // Fetched value
   const [editedLowStockThreshold, setEditedLowStockThreshold] = useState(''); // Value in input
@@ -67,68 +79,219 @@ function SystemSettingsTab() {
   }, []);
 
   // --- Service Status Management ---
-   const fetchServiceStatuses = async () => {
-     console.log("TODO: Fetch actual service statuses from DB");
-     // Replace initialStatuses with fetched data later
-     // setServiceStatuses(fetchedData);
-   };
+  const fetchServiceStatuses = async () => {
+    setLoadingStatuses(true);
+    console.log("Fetching service statuses from DB...");
+    try {
+      const { data, error } = await supabase
+        .from('service_statuses')
+        .select('*')
+        .order('display_order', { ascending: true });
 
-  const handleAddStatus = () => {
-    if (newStatusName.trim()) {
-      const { color, textColor } = getDefaultColor();
-      const newStatus = {
-        id: `temp-${Date.now()}`, // Temporary ID until saved
-        name: newStatusName.trim(),
-        color: color,
-        textColor: textColor,
-        is_editable: true,
-        is_archivable: true,
-      };
-      // TODO: API call to save new status
-      console.log("TODO: Save new status to DB", newStatus);
-      setServiceStatuses([...serviceStatuses, newStatus]);
-      setNewStatusName('');
-      toast.success(`Status "${newStatus.name}" ditambahkan (sementara).`);
+      if (error) throw error;
+
+      setServiceStatuses(data || []);
+    } catch (error) {
+      console.error("Error fetching service statuses:", error);
+      toast.error("Gagal memuat status servis.");
+    } finally {
+      setLoadingStatuses(false);
+    }
+  };
+
+  const openAddStatusModal = () => {
+    setNewStatusName('');
+    setNewStatusColor('blue');
+    setIsAddStatusModalOpen(true);
+  };
+
+  const closeAddStatusModal = () => {
+    setIsAddStatusModalOpen(false);
+    setNewStatusName('');
+    setNewStatusColor('blue');
+  };
+
+  const handleAddStatus = async () => {
+    if (!newStatusName.trim()) {
+      toast.error("Nama status tidak boleh kosong.");
+      return;
+    }
+
+    // Check for duplicate name
+    const isDuplicate = serviceStatuses.some(
+      s => s.name.toLowerCase() === newStatusName.trim().toLowerCase()
+    );
+    if (isDuplicate) {
+      toast.error("Status dengan nama ini sudah ada.");
+      return;
+    }
+
+    setIsAddingStatus(true);
+    try {
+      const maxOrder = serviceStatuses.length > 0 
+        ? Math.max(...serviceStatuses.map(s => s.display_order)) 
+        : 0;
+
+      const { data, error } = await supabase
+        .from('service_statuses')
+        .insert([{
+          name: newStatusName.trim(),
+          color: newStatusColor,
+          is_default: false,
+          display_order: maxOrder + 1
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setServiceStatuses([...serviceStatuses, data]);
+      toast.success(`Status "${data.name}" berhasil ditambahkan.`);
+      closeAddStatusModal();
+    } catch (error) {
+      console.error("Error adding status:", error);
+      toast.error(`Gagal menambahkan status: ${error.message}`);
+    } finally {
+      setIsAddingStatus(false);
     }
   };
 
   const startEditing = (status) => {
     setEditingStatusId(status.id);
     setEditStatusName(status.name);
+    setEditStatusColor(status.color);
   };
 
   const cancelEditing = () => {
     setEditingStatusId(null);
     setEditStatusName('');
+    setEditStatusColor('blue');
   };
 
-  const handleSaveEdit = (id) => {
-     const originalStatus = serviceStatuses.find(s => s.id === id);
-     const trimmedName = editStatusName.trim();
+  const handleSaveEdit = async (id) => {
+    const trimmedName = editStatusName.trim();
 
-     if (trimmedName && trimmedName !== originalStatus?.name) {
-        // TODO: API call to update status name
-        console.log("TODO: Update status name in DB", id, trimmedName);
-        setServiceStatuses(prev => prev.map(s => s.id === id ? { ...s, name: trimmedName } : s));
-        toast.success(`Status "${trimmedName}" diperbarui (sementara).`);
-     } else {
-        console.log("Edit cancelled or name unchanged.");
-        if (!trimmedName) toast.error("Nama status tidak boleh kosong.");
-     }
-     cancelEditing();
+    if (!trimmedName) {
+      toast.error("Nama status tidak boleh kosong.");
+      return;
+    }
+
+    // Check for duplicate name (excluding current status)
+    const isDuplicate = serviceStatuses.some(
+      s => s.id !== id && s.name.toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (isDuplicate) {
+      toast.error("Status dengan nama ini sudah ada.");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('service_statuses')
+        .update({
+          name: trimmedName,
+          color: editStatusColor,
+          updated_at: new Date()
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setServiceStatuses(prev => prev.map(s => 
+        s.id === id 
+          ? { ...s, name: trimmedName, color: editStatusColor } 
+          : s
+      ));
+      toast.success(`Status "${trimmedName}" berhasil diperbarui.`);
+      cancelEditing();
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast.error(`Gagal memperbarui status: ${error.message}`);
+    }
   };
 
-  const handleArchiveStatus = (id) => {
-     const statusToArchive = serviceStatuses.find(s => s.id === id);
-     if (statusToArchive) {
-         // Using a confirmation dialog library or window.confirm is recommended
-         if (window.confirm(`Anda yakin ingin mengarsipkan status "${statusToArchive.name}"?`)) {
-            // TODO: Call API to archive status
-            console.log("TODO: Call API to archive status", id);
-         setServiceStatuses(prev => prev.filter(s => s.id !== id));
-            toast.success(`Status "${statusToArchive.name}" diarsipkan (sementara).`);
-         }
-     }
+  const openDeleteModal = (status) => {
+    setStatusToDelete(status);
+    setIsDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    setIsDeleteModalOpen(false);
+    setStatusToDelete(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!statusToDelete) return;
+
+    setIsDeletingStatus(true);
+    try {
+      console.log('Checking if status is in use:', statusToDelete.name);
+      
+      // First, check if this status is being used by any orders
+      const { count, error: checkError } = await supabase
+        .from('service_orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', statusToDelete.name);
+
+      console.log('Count result:', count, 'Type:', typeof count, 'Error:', checkError);
+
+      if (checkError) throw checkError;
+
+      // If status is being used, show error and prevent deletion
+      if (count !== null && count !== undefined && count > 0) {
+        console.log('Status is in use by', count, 'orders. Blocking deletion.');
+        toast.error(
+          `Tidak dapat menghapus status "${statusToDelete.name}" karena masih digunakan oleh ${count} order. Ubah status order tersebut terlebih dahulu.`,
+          { duration: 5000 }
+        );
+        closeDeleteModal();
+        setIsDeletingStatus(false);
+        return;
+      }
+
+      console.log('Status not in use. Proceeding with deletion...');
+      
+      // Hard delete if not used by any orders
+      const { error } = await supabase
+        .from('service_statuses')
+        .delete()
+        .eq('id', statusToDelete.id);
+
+      if (error) {
+        console.log('Delete error:', error);
+        // Check if it's a foreign key constraint error (shouldn't happen after pre-check, but just in case)
+        if (error.code === '23503' || error.message.includes('foreign key') || error.message.includes('violates')) {
+          toast.error(
+            `Tidak dapat menghapus status "${statusToDelete.name}" karena masih digunakan oleh order aktif. Ubah status order tersebut terlebih dahulu.`,
+            { duration: 5000 }
+          );
+        } else {
+          throw error;
+        }
+        closeDeleteModal();
+        setIsDeletingStatus(false);
+        return;
+      }
+
+      console.log('Status deleted successfully');
+      setServiceStatuses(prev => prev.filter(s => s.id !== statusToDelete.id));
+      toast.success(`Status "${statusToDelete.name}" berhasil dihapus.`);
+      closeDeleteModal();
+    } catch (error) {
+      console.error("Error deleting status:", error);
+      
+      // More specific error messages
+      if (error.code === '23503' || error.message.includes('foreign key') || error.message.includes('violates')) {
+        toast.error(
+          `Tidak dapat menghapus status "${statusToDelete.name}" karena masih digunakan oleh order aktif. Ubah status order tersebut terlebih dahulu.`,
+          { duration: 5000 }
+        );
+      } else {
+        toast.error(`Gagal menghapus status: ${error.message}`);
+      }
+    } finally {
+      setIsDeletingStatus(false);
+    }
   };
 
   // --- Inventory Settings Management ---
@@ -226,7 +389,8 @@ function SystemSettingsTab() {
       const prefs = {};
       notificationSettingTypes.forEach(type => {
         const dbValue = data.find(d => d.setting_key === type.key)?.setting_value;
-        prefs[type.key] = dbValue !== 'false';
+        // setting_value is JSONB, so it's already boolean/null
+        prefs[type.key] = dbValue !== false && dbValue !== null; // Default to true if not set
       });
       setNotificationPreferences(prefs);
 
@@ -251,7 +415,7 @@ function SystemSettingsTab() {
       const { error } = await supabase
         .from('system_settings')
         .upsert(
-          { setting_key: key, setting_value: String(newEnabledValue), updated_at: new Date() },
+          { setting_key: key, setting_value: newEnabledValue, updated_at: new Date() },
           { onConflict: 'setting_key' }
         );
 
@@ -379,105 +543,125 @@ function SystemSettingsTab() {
           <FiTool className="mr-2 text-indigo-500" />
           Manajemen Status Servis
         </h3>
-        <p className="text-xs text-gray-500 mb-5">Kelola status yang dapat dipilih saat memperbarui order servis. Status default tidak dapat diubah atau diarsipkan.</p>
+        <p className="text-xs text-gray-500 mb-5">Kelola status yang dapat dipilih saat memperbarui order servis. Status default tidak dapat dihapus.</p>
         
-        {/* List Header */}
-         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 text-xs text-gray-500 font-medium mb-2">
-            <span className="w-2/5 lg:w-1/3">Nama Status</span>
-            <span className="w-3/5 lg:w-2/3 text-right pr-2">Aksi</span>
-         </div>
+        {loadingStatuses ? (
+          <div className="flex justify-center items-center py-10">
+            <FiLoader className="h-6 w-6 text-gray-400 animate-spin mr-3" />
+            <span className="text-gray-500">Memuat status servis...</span>
+          </div>
+        ) : (
+          <>
+            {/* List Header */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 text-xs text-gray-500 font-medium mb-2">
+              <span className="w-2/5 lg:w-1/3">Nama Status</span>
+              <span className="w-3/5 lg:w-2/3 text-right pr-2">Aksi</span>
+            </div>
 
-        <ul className="space-y-2 mb-4">
-          {serviceStatuses.map((status) => (
-            <li key={status.id} className="flex items-center justify-between p-3 bg-white rounded border border-gray-200 min-h-[54px] hover:border-gray-300 transition-colors shadow-sm hover:shadow-md">
-              {/* Status Name/Edit Input */} 
-              <div className="flex items-center flex-grow w-2/5 lg:w-1/3 mr-4">
-                 {/* Badge (shown always, slightly dimmed in edit mode) */}
-                 <span className={`px-2.5 py-1 inline-flex text-xs leading-4 font-semibold rounded-full mr-3 whitespace-nowrap ${status.color} ${status.textColor} ${editingStatusId === status.id ? 'opacity-60' : ''}`}>
-                    {/* Color indicator */} 
-                 </span>
-                 {editingStatusId === status.id ? (
-                    // --- Editing view --- 
-                    <input
-                      type="text"
-                      value={editStatusName}
-                      onChange={(e) => setEditStatusName(e.target.value)}
-                      className="text-sm px-2 py-1.5 border border-sky-400 rounded focus:ring-1 focus:ring-sky-500 focus:border-sky-500 w-full"
-                      autoFocus
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(status.id); if (e.key === 'Escape') cancelEditing(); }}
-                    />
-                 ) : (
-                    // --- Default view --- 
-                    <div className="flex items-baseline">
-                        {/* Larger, bolder font for name */}
-                        <span className="text-sm text-gray-900 font-semibold truncate" title={status.name}>{status.name}</span>
-                        {!status.is_editable && <span className="text-[10px] text-gray-500 ml-2 italic whitespace-nowrap">(Default)</span>}
+            <ul className="space-y-2 mb-4">
+              {serviceStatuses.map((status) => {
+                const colorClasses = getColorClasses(status.color);
+                return (
+                  <li key={status.id} className="flex items-center justify-between p-3 bg-white rounded border border-gray-200 min-h-[54px] hover:border-gray-300 transition-colors shadow-sm hover:shadow-md">
+                    {/* Status Name/Edit Input */} 
+                    <div className="flex items-center flex-grow w-2/5 lg:w-1/3 mr-4">
+                      {/* Badge (shown always, slightly dimmed in edit mode) */}
+                      <span className={`px-2.5 py-1 inline-flex text-xs leading-4 font-semibold rounded-full mr-3 whitespace-nowrap ${colorClasses.bgClass} ${colorClasses.textClass} ${editingStatusId === status.id ? 'opacity-60' : ''}`}>
+                        {status.name}
+                      </span>
+                      {editingStatusId === status.id && (
+                        // --- Editing view --- 
+                        <div className="flex-grow flex flex-col space-y-2">
+                          <input
+                            type="text"
+                            value={editStatusName}
+                            onChange={(e) => setEditStatusName(e.target.value)}
+                            className="text-sm px-2 py-1.5 border border-sky-400 rounded focus:ring-1 focus:ring-sky-500 focus:border-sky-500 w-full"
+                            autoFocus
+                            onKeyDown={(e) => { 
+                              if (e.key === 'Enter') handleSaveEdit(status.id); 
+                              if (e.key === 'Escape') cancelEditing(); 
+                            }}
+                            placeholder="Nama status"
+                          />
+                          <select
+                            value={editStatusColor}
+                            onChange={(e) => setEditStatusColor(e.target.value)}
+                            className="text-xs px-2 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
+                          >
+                            {COLOR_OPTIONS.map(colorOpt => (
+                              <option key={colorOpt.value} value={colorOpt.value}>
+                                {colorOpt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {editingStatusId !== status.id && (
+                        // --- Default view --- 
+                        <div className="flex items-baseline">
+                          <span className="text-xs text-gray-500 ml-2 italic whitespace-nowrap">
+                            {status.is_default ? '(Default)' : ''}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                 )}
-              </div>
 
-               {/* Action Buttons - Updated styles */}
-              <div className="flex-shrink-0 flex items-center justify-end space-x-1.5 w-3/5 lg:w-2/3">
-                  {editingStatusId === status.id ? (
-                      // --- Edit Actions --- 
-                      <>
-                        <button onClick={() => handleSaveEdit(status.id)} className={saveButtonClasses} title="Simpan Perubahan">
-                           <FiSave size={14} className="mr-1.5"/> Simpan
-                        </button>
-                        <button onClick={cancelEditing} className={cancelButtonClasses} title="Batal Edit">
-                           <FiX size={14} className="mr-1.5"/> Batal
-                        </button>
-                      </>
-                   ) : ( 
-                      // --- Default Actions --- 
-                      <>
-                         {status.is_editable && (
-                            <button
+                    {/* Action Buttons */}
+                    <div className="flex-shrink-0 flex items-center justify-end space-x-1.5 w-3/5 lg:w-2/3">
+                      {editingStatusId === status.id ? (
+                        // --- Edit Actions --- 
+                        <>
+                          <button onClick={() => handleSaveEdit(status.id)} className={saveButtonClasses} title="Simpan Perubahan">
+                            <FiSave size={14} className="mr-1.5"/> Simpan
+                          </button>
+                          <button onClick={cancelEditing} className={cancelButtonClasses} title="Batal Edit">
+                            <FiX size={14} className="mr-1.5"/> Batal
+                          </button>
+                        </>
+                      ) : ( 
+                        // --- Default Actions --- 
+                        <>
+                          {!status.is_default && (
+                            <>
+                              <button
                                 onClick={() => startEditing(status)}
                                 className={editButtonClasses}
                                 title={`Ubah Status "${status.name}"`}
-                            >
+                              >
                                 <FiEdit2 className="h-4 w-4 mr-1.5" /> Ubah
-                            </button>
-                        )}
-                        {status.is_archivable && (
-                            <button
-                                onClick={() => handleArchiveStatus(status.id)}
+                              </button>
+                              <button
+                                onClick={() => openDeleteModal(status)}
                                 className={archiveButtonClasses}
-                                title={`Arsipkan Status "${status.name}"`}
-                            >
-                              <FiArchive className="h-4 w-4 mr-1.5" /> Arsipkan
-                            </button>
-                        )}
-                        {!status.is_editable && !status.is_archivable && (
-                             <span className="text-xs text-gray-400 italic pr-2">-</span>
-                         )}
-                      </>
-                  )}
-              </div>
-            </li>
-          ))}
-        </ul>
-        
-        {/* Add New Status Form - Adjusted button text */}
-        <div className="flex items-center space-x-2 mt-5 pt-4 border-t border-gray-200">
-           {/* ... input ... */}
-            <input
-            type="text"
-            value={newStatusName}
-            onChange={(e) => setNewStatusName(e.target.value)}
-            placeholder="Nama status baru..."
-            className="flex-grow p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 text-sm"
-             onKeyDown={(e) => { if (e.key === 'Enter') handleAddStatus(); }}
-            />
-          <button
-            onClick={handleAddStatus}
-            disabled={!newStatusName.trim()}
-            className={`${primarySaveButtonClasses} py-2`} // Re-use primary style
-          >
-            <FiPlus className="-ml-1 mr-2 h-4 w-4" /> Tambah Status
-          </button>
-        </div>
+                                title={`Hapus Status "${status.name}"`}
+                              >
+                                <FiTrash2 className="h-4 w-4 mr-1.5" /> Hapus
+                              </button>
+                            </>
+                          )}
+                          {status.is_default && (
+                            <span className="text-xs text-gray-400 italic pr-2">-</span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            
+            {/* Add New Status Button */}
+            <div className="flex justify-center mt-5 pt-4 border-t border-gray-200">
+              <button
+                onClick={openAddStatusModal}
+                className={`${primarySaveButtonClasses} py-2`}
+              >
+                <FiPlus className="-ml-1 mr-2 h-4 w-4" /> Tambah Status Baru
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* REMOVED Placeholder Section: Service Types */}
@@ -764,6 +948,141 @@ function SystemSettingsTab() {
             </form>
          )}
        </div>
+
+      {/* Add Status Modal */}
+      <Dialog 
+        open={isAddStatusModalOpen} 
+        onClose={closeAddStatusModal}
+        className="relative z-50"
+      >
+        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
+        
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <Dialog.Panel className="mx-auto max-w-md w-full bg-white rounded-lg shadow-xl">
+            <div className="p-6">
+              <Dialog.Title className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <FiPlus className="mr-2 text-sky-600" />
+                Tambah Status Baru
+              </Dialog.Title>
+
+              <div className="space-y-4">
+                {/* Status Name Input */}
+                <div>
+                  <label htmlFor="newStatusName" className="block text-sm font-medium text-gray-700 mb-1">
+                    Nama Status <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="newStatusName"
+                    value={newStatusName}
+                    onChange={(e) => setNewStatusName(e.target.value)}
+                    className={inputBaseClass}
+                    placeholder="Contoh: Dalam Pengiriman"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newStatusName.trim()) handleAddStatus();
+                      if (e.key === 'Escape') closeAddStatusModal();
+                    }}
+                  />
+                </div>
+
+                {/* Color Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Pilih Warna <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {COLOR_OPTIONS.map((colorOpt) => (
+                      <button
+                        key={colorOpt.value}
+                        type="button"
+                        onClick={() => setNewStatusColor(colorOpt.value)}
+                        className={`relative flex flex-col items-center p-2 rounded border-2 transition-all ${
+                          newStatusColor === colorOpt.value
+                            ? 'border-sky-500 bg-sky-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                        title={colorOpt.label}
+                      >
+                        <div className={`w-8 h-8 rounded-full ${colorOpt.previewBg}`} />
+                        <span className="text-[10px] text-gray-600 mt-1">{colorOpt.label}</span>
+                        {newStatusColor === colorOpt.value && (
+                          <div className="absolute top-1 right-1">
+                            <FiCheckSquare className="w-4 h-4 text-sky-600" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preview */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preview
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded border border-gray-200">
+                    {newStatusName.trim() ? (
+                      <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getColorClasses(newStatusColor).bgClass} ${getColorClasses(newStatusColor).textClass}`}>
+                        {newStatusName}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-gray-400 italic">Masukkan nama status untuk melihat preview</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={closeAddStatusModal}
+                  disabled={isAddingStatus}
+                  className={`${cancelButtonClasses} px-4 py-2 disabled:opacity-50`}
+                >
+                  <FiX className="mr-1.5 h-4 w-4" /> Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddStatus}
+                  disabled={!newStatusName.trim() || isAddingStatus}
+                  className={`${primarySaveButtonClasses} px-4 py-2`}
+                >
+                  {isAddingStatus ? (
+                    <>
+                      <FiLoader className="mr-2 h-4 w-4 animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <FiPlus className="mr-2 h-4 w-4" />
+                      Tambah Status
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
+
+      {/* Delete Status Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={isDeleteModalOpen}
+        onClose={closeDeleteModal}
+        onConfirm={handleConfirmDelete}
+        title="Hapus Status Servis?"
+        message={
+          statusToDelete
+            ? `Apakah Anda yakin ingin menghapus status "${statusToDelete.name}"? Tindakan ini tidak dapat dibatalkan.`
+            : ''
+        }
+        confirmText="Hapus"
+        cancelText="Batal"
+        isLoading={isDeletingStatus}
+        icon={FiAlertTriangle}
+      />
 
     </div>
   );

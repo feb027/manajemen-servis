@@ -237,7 +237,7 @@ function Header({ toggleSidebar, isSidebarOpen }) {
         // Now update the database
         const { error } = await supabase
           .from('notifications')
-          .update({ is_read: true, read_at: new Date() })
+          .update({ is_read: true })
           .eq('user_id', user.id)
           .in('id', idsToMark);
 
@@ -273,7 +273,7 @@ function Header({ toggleSidebar, isSidebarOpen }) {
       try {
           const { error } = await supabase
               .from('notifications')
-              .update({ is_read: true, read_at: new Date() })
+              .update({ is_read: true })
               .eq('user_id', user.id)
               .eq('is_read', false); // Target only currently unread ones
 

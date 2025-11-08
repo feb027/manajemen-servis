@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, Fragment } from 'react';
 import { supabase } from '../supabase/supabaseClient'; // Import supabase
 import ServiceOrderTable from '../components/ServiceOrderTable'; // Import the table component
-import { FiDatabase, FiUsers, FiClipboard, FiUserPlus, FiSearch, FiFilter, FiX, FiChevronLeft, FiChevronRight, FiEye, FiCheckSquare, FiEdit, FiTrash2, FiActivity, FiList, FiSliders } from 'react-icons/fi'; // Added Eye, CheckSquare, Edit, Trash2, FiActivity, FiList, FiSliders
+import { FiDatabase, FiUsers, FiClipboard, FiUserPlus, FiSearch, FiFilter, FiX, FiChevronLeft, FiChevronRight, FiEye, FiCheckSquare, FiEdit, FiTrash2, FiActivity, FiList, FiSliders } from 'react-icons/fi';
 import { FaSort, FaSortUp, FaSortDown } from 'react-icons/fa'; // Added sort icons
 import Toast from '../components/Toast'; // Import Toast for feedback
 import UserTable from '../components/UserTable'; // Import UserTable
@@ -54,6 +54,7 @@ function AdminDashboard() {
   const [orderStatusFilter, setOrderStatusFilter] = useState('Semua');
   const [orderSortConfig, setOrderSortConfig] = useState({ key: 'created_at', direction: 'descending' }); // Default sort
   const [orderCurrentPage, setOrderCurrentPage] = useState(1);
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set()); // For multi-select
 
   // --- Order Action Modals State ---
   const [selectedOrder, setSelectedOrder] = useState(null); // For Detail View
@@ -76,9 +77,18 @@ function AdminDashboard() {
   const [debouncedUserSearchTerm, setDebouncedUserSearchTerm] = useState('');
   const [userSortConfig, setUserSortConfig] = useState({ key: 'full_name', direction: 'ascending' }); // Add user sort state
 
-  // State for Confirmation Modal
+  // State for User Confirmation Modal
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
+
+  // State for Order Delete Confirmation Modal
+  const [orderToDelete, setOrderToDelete] = useState(null);
+  const [isDeleteConfirmModalOpen, setIsDeleteConfirmModalOpen] = useState(false);
+  const [isDeleteConfirmModalClosing, setIsDeleteConfirmModalClosing] = useState(false);
+
+  // State for Bulk Delete Confirmation Modal
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isBulkDeleteModalClosing, setIsBulkDeleteModalClosing] = useState(false);
 
   const fetchAllOrders = async () => {
     setLoadingOrders(true); // Use specific loading state
@@ -295,6 +305,29 @@ function AdminDashboard() {
     return () => clearTimeout(timerId);
   }, [userSearchTerm]);
 
+  // Delete Confirmation Modal Animation/Close Effects
+  useEffect(() => {
+    if (isDeleteConfirmModalClosing) {
+      const timer = setTimeout(() => {
+        setOrderToDelete(null);
+        setIsDeleteConfirmModalOpen(false);
+        setIsDeleteConfirmModalClosing(false);
+      }, MODAL_ANIMATION_DURATION);
+      return () => clearTimeout(timer);
+    }
+  }, [isDeleteConfirmModalClosing]);
+
+  // Bulk Delete Modal Animation/Close Effects
+  useEffect(() => {
+    if (isBulkDeleteModalClosing) {
+      const timer = setTimeout(() => {
+        setIsBulkDeleteModalOpen(false);
+        setIsBulkDeleteModalClosing(false);
+      }, MODAL_ANIMATION_DURATION);
+      return () => clearTimeout(timer);
+    }
+  }, [isBulkDeleteModalClosing]);
+
   // --- Processed Orders (Filter + Sort) --- 
   const processedOrders = useMemo(() => {
     let items = [...allOrders];
@@ -470,12 +503,17 @@ function AdminDashboard() {
     const handleEsc = (event) => {
       if (event.keyCode === 27) {
          if (isUserModalOpen) triggerCloseUserModal();
-         if (isDetailModalOpen || isStatusModalOpen || isEditModalOpen) triggerCloseOrderModal();
+         if (isDetailModalOpen || isStatusModalOpen || isEditModalOpen) {
+           // Inline the close logic to avoid dependency issues
+           if (isDetailModalOpen) setIsDetailModalClosing(true);
+           if (isStatusModalOpen) setIsStatusModalClosing(true);
+           if (isEditModalOpen) setIsEditModalClosing(true);
+         }
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [isUserModalOpen, isDetailModalOpen, isStatusModalOpen, isEditModalOpen]); // Add dependencies
+  }, [isUserModalOpen, isDetailModalOpen, isStatusModalOpen, isEditModalOpen]); // Dependencies are modal state only
 
   // --- Order Action Handlers ---
   const handleViewDetailsClick = (order) => {
@@ -490,19 +528,145 @@ function AdminDashboard() {
       openEditModal(order);
   };
 
-  // Confirm Status Update (Admin version - simpler)
-  const handleConfirmStatusUpdate = async (orderId, newStatus) => {
-    if (!orderId || !newStatus) return;
-    console.log(`Admin updating status for order ${orderId} to ${newStatus}`);
+  const openDeleteConfirmModal = (order) => {
+    setOrderToDelete(order);
+    setIsDeleteConfirmModalOpen(true);
+    setIsDeleteConfirmModalClosing(false);
+  };
+
+  const triggerCloseDeleteModal = () => {
+    setIsDeleteConfirmModalClosing(true);
+  };
+
+  const handleDeleteClick = (order) => {
+    openDeleteConfirmModal(order);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!orderToDelete) return;
+    const orderIdToDelete = orderToDelete.id;
+    console.log(`Attempting to delete order ${orderIdToDelete}`);
+    
     try {
+      // First delete related logs
+      const { error: logError } = await supabase
+        .from('service_order_logs')
+        .delete()
+        .eq('service_order_id', orderIdToDelete);
+        
+      if (logError) {
+        console.error("Error deleting related service order logs:", logError);
+        throw new Error(`Gagal menghapus log terkait: ${logError.message}`); 
+      }
+      console.log(`Successfully deleted logs for order ${orderIdToDelete}`);
+
+      // Then delete the order
+      const { error: deleteError } = await supabase
+        .from('service_orders')
+        .delete()
+        .eq('id', orderIdToDelete);
+
+      if (deleteError) throw deleteError;
+
+      setToastMessage(`Order #${orderIdToDelete.substring(0, 8)} berhasil dihapus.`);
+      triggerCloseDeleteModal();
+      fetchAllOrders(); // Refresh the list
+    } catch (err) {
+      console.error("Error deleting order:", err);
+      setToastMessage(`Gagal menghapus order: ${err.message}`);
+      triggerCloseDeleteModal();
+    }
+  };
+
+  const handleSelectRow = (orderId, isChecked) => {
+    setSelectedOrderIds(prevSelected => {
+      const newSelected = new Set(prevSelected);
+      if (isChecked) {
+        newSelected.add(orderId);
+      } else {
+        newSelected.delete(orderId);
+      }
+      return newSelected;
+    });
+  };
+
+  const handleSelectAll = (isChecked) => {
+    if (isChecked) {
+      const allIds = new Set(paginatedOrders.map(order => order.id));
+      setSelectedOrderIds(allIds);
+    } else {
+      setSelectedOrderIds(new Set());
+    }
+  };
+
+  const openBulkDeleteModal = () => {
+    if (selectedOrderIds.size === 0) return;
+    setIsBulkDeleteModalOpen(true);
+  };
+
+  const triggerCloseBulkDeleteModal = () => {
+    setIsBulkDeleteModalClosing(true);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    const idsToDelete = Array.from(selectedOrderIds);
+    if (idsToDelete.length === 0) return;
+
+    console.log(`Bulk deleting orders: ${idsToDelete.join(', ')}`);
+    try {
+      // First delete all related logs
+      const { error: logError } = await supabase
+        .from('service_order_logs')
+        .delete()
+        .in('service_order_id', idsToDelete);
+        
+      if (logError) {
+        console.error("Error deleting related service order logs:", logError);
+        throw new Error(`Gagal menghapus log terkait: ${logError.message}`); 
+      }
+      console.log(`Successfully deleted logs for ${idsToDelete.length} orders`);
+
+      // Then delete the orders
+      const { error: deleteError } = await supabase
+        .from('service_orders')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (deleteError) throw deleteError;
+
+      setToastMessage(`${idsToDelete.length} order berhasil dihapus.`);
+      setSelectedOrderIds(new Set());
+      triggerCloseBulkDeleteModal();
+      fetchAllOrders(); // Refresh the list
+    } catch (err) {
+      console.error("Error bulk deleting orders:", err);
+      setToastMessage(`Gagal menghapus ${idsToDelete.length} order: ${err.message}`);
+      triggerCloseBulkDeleteModal();
+    }
+  };
+
+  // Confirm Status Update (Admin version)
+  const handleConfirmStatusUpdate = async (orderId, newStatus, updateData = {}) => {
+    if (!orderId || !newStatus) return;
+    console.log(`Admin updating status for order ${orderId} to ${newStatus}`, updateData);
+    try {
+        // Merge status and updateData, ensure updated_at is set
+        const dataToUpdate = {
+          ...updateData,
+          status: newStatus,
+          updated_at: new Date()
+        };
+        
         const { error } = await supabase
           .from('service_orders')
-          .update({ status: newStatus, updated_at: new Date() }) // Also update timestamp
+          .update(dataToUpdate)
           .eq('id', orderId);
+          
         if (error) throw error;
+        
         setToastMessage('Status order berhasil diperbarui!');
         triggerCloseOrderModal(); // Close the status modal
-        // Data should refresh via subscription, but could force fetch if needed: fetchAllOrders(); 
+        fetchAllOrders(); // Refresh the list
     } catch (err) {
          console.error("Error updating status (Admin):", err);
          setToastMessage(`Gagal update status: ${err.message}`);
@@ -772,6 +936,20 @@ function AdminDashboard() {
                   </div>
                </div>
 
+               {/* Bulk Action Button */}
+               <div className="mb-4 flex justify-start items-center">
+                 <div className={`transition-opacity duration-300 ${selectedOrderIds.size > 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                   <button
+                     onClick={openBulkDeleteModal}
+                     disabled={selectedOrderIds.size === 0}
+                     className="inline-flex items-center px-3 py-2 border border-red-300 rounded-md shadow-sm text-xs font-medium text-red-800 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
+                   >
+                     <FiTrash2 className="h-4 w-4 mr-1.5"/>
+                     Hapus Terpilih ({selectedOrderIds.size})
+                   </button>
+                 </div>
+               </div>
+
                <h2 className="text-xl font-semibold text-gray-800 mb-4">Daftar Lengkap Order Servis</h2>
                <ServiceOrderTable
                    orders={paginatedOrders} // Use paginated orders
@@ -779,13 +957,15 @@ function AdminDashboard() {
                    isLoading={isLoading} // Use global loading, or loadingOrders if preferred
                    sortConfig={orderSortConfig}
                    requestSort={requestOrderSort}
-                   selectedOrderIds={new Set()} // Assuming no selection needed here
-                   onSelectOrder={() => {}} // Assuming no selection needed here
+                   selectedOrderIds={selectedOrderIds} // Pass selected order IDs
+                   onSelectRow={handleSelectRow} // Pass select handler
+                   onSelectAll={handleSelectAll} // Pass select all handler
                    isAdminView={true} 
                    onRowClick={handleViewDetailsClick} // View details on row click
-                   onAssign={null} // No direct assign from this view
-                   onUpdateStatusClick={handleUpdateStatusClick} // Button to open status modal
+                   onAssignClick={null} // No direct assign from this view
+                   onStatusUpdateClick={handleUpdateStatusClick} // Button to open status modal
                    onEditClick={handleEditClick} // Button to open edit modal
+                   onDeleteClick={handleDeleteClick} // Pass delete handler
                 />
                 {totalOrderPages > 1 && (
                     <Pagination 
@@ -888,7 +1068,7 @@ function AdminDashboard() {
                {orderToUpdateStatus && <UpdateStatusModal 
                   order={orderToUpdateStatus} 
                   currentStatus={orderToUpdateStatus?.status} 
-                  onUpdate={handleConfirmStatusUpdate}
+                  onConfirm={handleConfirmStatusUpdate}
                   onClose={triggerCloseOrderModal}
                   allowedStatuses={['Baru', 'Diproses', 'Menunggu Spare Part', 'Selesai', 'Dibatalkan']} 
                 />}
@@ -917,6 +1097,37 @@ function AdminDashboard() {
           />
       )} 
 
+      {/* Bulk Delete Confirmation Modal */}
+      {(isBulkDeleteModalOpen || isBulkDeleteModalClosing) && (
+        <ConfirmationModal
+          isOpen={isBulkDeleteModalOpen}
+          onClose={triggerCloseBulkDeleteModal}
+          onConfirm={handleConfirmBulkDelete}
+          title="Konfirmasi Hapus Bulk"
+          message={`Anda yakin ingin menghapus ${selectedOrderIds.size} order yang dipilih secara permanen? Tindakan ini tidak dapat dibatalkan dan akan menghapus semua log terkait.`}
+          confirmText="Ya, Hapus Semua"
+          cancelText="Batal"
+          confirmButtonVariant="danger"
+          icon={FiTrash2}
+        />
+      )}
+
+      {/* Order Delete Confirmation Modal */}
+      {(isDeleteConfirmModalOpen || isDeleteConfirmModalClosing) && (
+           <ConfirmationModal
+             isOpen={isDeleteConfirmModalOpen}
+             onClose={triggerCloseDeleteModal}
+             onConfirm={handleConfirmDelete}
+             title="Konfirmasi Hapus Order"
+             message={`Anda yakin ingin menghapus permanen Order Servis #${orderToDelete?.id?.substring(0, 8)} (${orderToDelete?.customer_name} - ${orderToDelete?.device_type})? Tindakan ini tidak dapat dibatalkan dan akan menghapus log terkait.`}
+             confirmText="Ya, Hapus"
+             cancelText="Batal"
+             confirmButtonVariant="danger"
+             icon={FiTrash2}
+           />
+      )}
+
+      {/* User Delete Confirmation Modal */}
       <ConfirmationModal
         isOpen={isConfirmModalOpen}
         onClose={closeConfirmModal}

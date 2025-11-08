@@ -467,20 +467,12 @@ function ReceptionistDashboard() {
 
   const stats = useMemo(() => {
     const total = serviceOrders.length;
-    // Use capitalized keys matching the actual status values
-    const statsByStatus = {
-      'Baru': 0,
-      'Diproses': 0,
-      'Menunggu Spare Part': 0,
-      'Selesai': 0,
-      'Dibatalkan': 0
-    };
-    // Calculate totals for each status
+    
+    // Dynamically count all statuses (not hardcoded)
+    const statsByStatus = {};
     serviceOrders.forEach(o => {
         const status = o.status || 'Baru'; // Default to Baru if null
-        if (Object.hasOwn(statsByStatus, status)) {
-            statsByStatus[status]++;
-        }
+        statsByStatus[status] = (statsByStatus[status] || 0) + 1;
     });
 
     // Calculate new stats: Revenue and Orders Completed Today
