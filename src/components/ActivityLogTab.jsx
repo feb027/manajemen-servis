@@ -91,13 +91,31 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
     setLoading(true);
     setError(null);
     try {
-      // Fetch Order Logs 
+      // Fetch Order Logs
       const { data: orderLogsData, error: orderError } = await supabase
         .from('service_order_logs') 
         .select(`id, created_at, event_type, details, user_id, service_order_id`)
         .order('created_at', { ascending: false });
 
       if (orderError) throw new Error(`Error fetching order logs: ${orderError.message}`);
+
+      // Fetch service orders for customer names
+      const orderIds = [...new Set((orderLogsData || []).map(log => log.service_order_id).filter(id => id))];
+      let orderMap = {};
+      if (orderIds.length > 0) {
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('service_orders')
+          .select('id, customer_name')
+          .in('id', orderIds);
+        if (ordersError) {
+          console.error("Error fetching service orders:", ordersError);
+        } else {
+          orderMap = (ordersData || []).reduce((map, order) => {
+            map[order.id] = order.customer_name;
+            return map;
+          }, {});
+        }
+      }
 
       // Fetch Inventory Logs
       const { data: inventoryLogsData, error: inventoryError } = await supabase
@@ -123,7 +141,7 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
          else { userMap = usersData.reduce((map, user) => { map[user.id] = user.full_name; return map; }, {}); }
       }
 
-      // Map Order Logs - Apply friendly action name
+      // Map Order Logs - Apply friendly action name and include customer_name
       const formattedOrderLogs = (orderLogsData || []).map(log => ({
         id: `order-${log.id}`,
         timestamp: log.created_at,
@@ -132,7 +150,8 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
         action: mapActionName('order', log.event_type), // Map the action name
         details: log.details,
         type: 'order',
-        related_id: log.service_order_id 
+        related_id: log.service_order_id,
+        customer_name: orderMap[log.service_order_id] || null // Add customer name from orderMap
       }));
 
       // Map Inventory Logs - Apply friendly action name
@@ -257,19 +276,18 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
         };
         if (type === 'order') {
             const orderId = related_id || parsedDetails?.order_id || parsedDetails?.service_order_id || '?';
+            const customerName = log.customer_name || parsedDetails?.customer_name || '?';
             if (action === 'Buat Order') { 
-                 const customerName = parsedDetails?.customer_name || '?'; 
                  const deviceType = parsedDetails?.device_type || '?';
                 detailElement = (
                   <span>
-                    <IdBadge prefix="Order" id={orderId} />
-                    dibuat u/ <NameSpan name={customerName} /> (Perangkat: <span className='text-gray-600'>{deviceType}</span>).
+                    Order u/ <NameSpan name={customerName} /> (Perangkat: <span className='text-gray-600'>{deviceType}</span>) dibuat.
                   </span>
                 );
             } else if (action === 'Update Status') {
                  detailElement = (
                    <span>
-                     <IdBadge prefix="Order" id={orderId} /> Status: <ValueChange oldValue={parsedDetails?.old} newValue={parsedDetails?.new} />
+                     Order <NameSpan name={customerName} /> - Status: <ValueChange oldValue={parsedDetails?.old} newValue={parsedDetails?.new} />
                    </span>
                  );
             } else if (action === 'Tugaskan Teknisi') {
@@ -277,7 +295,7 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
                 const newTech = getUserName(parsedDetails?.new_technician_id || parsedDetails?.new_id);
                 detailElement = (
                    <span>
-                     <IdBadge prefix="Order" id={orderId} /> Teknisi: {oldTech} <FiArrowRight className="h-3 w-3 text-gray-400 inline mx-1" /> {newTech}
+                     Order <NameSpan name={customerName} /> - Teknisi: {oldTech} <FiArrowRight className="h-3 w-3 text-gray-400 inline mx-1" /> {newTech}
                    </span>
                  );
             } else if (action === 'Update Biaya') { 
@@ -312,21 +330,22 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
             } 
         }
         else if (type === 'inventory') {
-             const itemId = related_id || parsedDetails?.item_id || '?';
+             // const itemId = related_id || parsedDetails?.item_id || '?'; // Not used anymore
              const itemName = parsedDetails?.item_name || '?'; 
              if (action === 'Buat Item') {
-                 detailElement = <span><IdBadge prefix="Item" id={itemId} /> (<NameSpan name={itemName} />) dibuat.</span>;
+                 detailElement = <span>Item <NameSpan name={itemName} /> dibuat.</span>;
              } else if (action === 'Hapus Item') {
-                  detailElement = <span><IdBadge prefix="Item" id={itemId} /> (<NameSpan name={itemName} />) dihapus.</span>;
+                  detailElement = <span>Item <NameSpan name={itemName} /> dihapus.</span>;
              } else if (action === 'Update Stok/Item') {
                   const changesArray = Array.isArray(parsedDetails) ? parsedDetails : [parsedDetails];
                  let changeElements = [];
                  changesArray.forEach((changeDetail, index) => {
                      if(changeDetail?.field === 'stock' && changeDetail.new_value !== undefined && changeDetail.old_value !== undefined) {
                          const stockChange = changeDetail.new_value - changeDetail.old_value;
+                         const displayName = changeDetail?.item_name || itemName;
                          changeElements.push(
                            <Fragment key={`stock-${index}`}>
-                             Stok: <ValueChange oldValue={changeDetail.old_value} newValue={changeDetail.new_value} /> 
+                             Stok "<NameSpan name={displayName} />": <ValueChange oldValue={changeDetail.old_value} newValue={changeDetail.new_value} /> 
                              (<span className={stockChange >= 0 ? 'text-green-700' : 'text-red-600'}>{stockChange >= 0 ? '+' : ''}{stockChange}</span>)
                            </Fragment>
                          );
@@ -342,12 +361,11 @@ function ActivityLogTab({ allUsers = [] }) { // Pass allUsers for filtering
                  if (changeElements.length > 0) {
                      detailElement = (
                        <span className="flex flex-wrap gap-x-3 gap-y-1 items-center">
-                          <IdBadge prefix="Item" id={itemId} />
                           {changeElements.map((el, i) => <span key={i}>{el}</span>)} 
                        </span>
                      );
                  } else {
-                     detailElement = <span><IdBadge prefix="Item" id={itemId} /> Update terdeteksi (detail tidak terbaca).</span>;
+                     detailElement = <span>Item "<NameSpan name={itemName} />" diperbarui (detail tidak terbaca).</span>;
                  }
              } 
         }

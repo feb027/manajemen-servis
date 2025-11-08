@@ -29,25 +29,71 @@ const getActivityDetails = (log, users = [], technicians = []) => {
     const userName = user ? user.full_name : (log.user_id ? `User (${log.user_id.substring(0, 6)}...)` : 'Sistem');
     let message = 'Aksi tidak diketahui';
     let Icon = FiActivity;
-    const orderIdShort = String(log.service_order_id).substring(0, 8);
-
-    switch (log.event_type) {
-      case 'CREATED': message = `Order #${orderIdShort} dibuat`; Icon = FiPlusCircle; break;
-      case 'STATUS_CHANGED': message = `Status Order #${orderIdShort} diubah ke "${log.details?.new || 'N/A'}"`; Icon = FiCheckSquare; break;
-      case 'TECHNICIAN_ASSIGNED':
-            {
-              const newTechId = log.details?.new_id;
-              // Use the passed technicians list for lookup
-              const assignedTechnician = technicians.find(t => t.id === newTechId); 
-              const newTechName = assignedTechnician ? assignedTechnician.full_name : (newTechId ? `ID (${newTechId.substring(0,6)}...)` : 'Tidak Ada');
-              message = `Teknisi ${newTechName} ditugaskan ke Order #${orderIdShort}`; Icon = FiUserCheck;
+    
+    // For service order events
+    if (log.service_order_id) {
+      const customerName = log.customer_name || 'Customer';
+      switch (log.event_type) {
+        case 'CREATED': message = `Order untuk ${customerName} dibuat`; Icon = FiPlusCircle; break;
+        case 'STATUS_CHANGED': message = `Order ${customerName} - Status diubah ke "${log.details?.new || 'N/A'}"`; Icon = FiCheckSquare; break;
+        case 'TECHNICIAN_ASSIGNED':
+              {
+                const newTechId = log.details?.new_id;
+                const assignedTechnician = technicians.find(t => t.id === newTechId); 
+                const newTechName = assignedTechnician ? assignedTechnician.full_name : (newTechId ? `ID (${newTechId.substring(0,6)}...)` : 'Tidak Ada');
+                message = `Teknisi ${newTechName} ditugaskan ke order ${customerName}`; Icon = FiUserCheck;
+              }
+              break;
+        case 'COST_UPDATED': message = `Biaya order ${customerName} diupdate menjadi ${formatCurrency(log.details?.new)}`; Icon = FiDollarSign; break;
+        case 'NOTES_UPDATED': message = `Catatan order ${customerName} diperbarui`; Icon = FiMessageSquare; break;
+        case 'PARTS_UPDATED': message = `Sparepart order ${customerName} diperbarui`; Icon = FiTool; break;
+        case 'DETAILS_EDITED': message = `Detail order ${customerName} diedit`; Icon = FiEdit3; break;
+        default: message = `Event: ${log.event_type} pada order ${customerName}`; break;
+      }
+    } 
+    // For inventory events (uses 'action' column, not 'event_type')
+    else if (log.item_id) {
+      const itemName = log.item_name || 'Item';
+      const action = log.action; // inventory_logs uses 'action' column
+      
+      switch (action) {
+        case 'ITEM_CREATED': 
+        case 'CREATE_ITEM':
+          message = `Item '${itemName}' ditambahkan ke inventory`; 
+          Icon = FiPlusCircle; 
+          break;
+        case 'ITEM_UPDATED': 
+        case 'UPDATE_ITEM':
+          message = `Item '${itemName}' diupdate`; 
+          Icon = FiEdit3; 
+          break;
+        case 'STOCK_ADJUSTMENT': 
+          {
+            // Parse changes from JSONB column
+            let changes = log.changes;
+            if (typeof changes === 'string') {
+              try { changes = JSON.parse(changes); } catch { changes = null; }
             }
-            break;
-      case 'COST_UPDATED': message = `Biaya Order #${orderIdShort} diupdate menjadi ${formatCurrency(log.details?.new)}`; Icon = FiDollarSign; break;
-      case 'NOTES_UPDATED': message = `Catatan Order #${orderIdShort} diperbarui`; Icon = FiMessageSquare; break;
-      case 'PARTS_UPDATED': message = `Sparepart Order #${orderIdShort} diperbarui`; Icon = FiTool; break;
-      case 'DETAILS_EDITED': message = `Detail Order #${orderIdShort} diedit`; Icon = FiEdit3; break;
-      default: message = `Event: ${log.event_type} pada Order #${orderIdShort}`; break;
+            
+            // Handle both object and array format
+            const changeData = Array.isArray(changes) ? changes[0] : changes;
+            const oldStock = changeData?.old_value || 0;
+            const newStock = changeData?.new_value || 0;
+            const diff = newStock - oldStock;
+            
+            message = `Stok '${itemName}' ${diff > 0 ? 'ditambah' : 'dikurangi'} ${Math.abs(diff)} (${oldStock} → ${newStock})`;
+            Icon = FiActivity;
+          }
+          break;
+        case 'ITEM_DELETED': 
+        case 'DELETE_ITEM':
+          message = `Item '${itemName}' dihapus dari inventory`; 
+          Icon = FiActivity; 
+          break;
+        default: 
+          message = `${action || 'Event'} pada item '${itemName}'`; 
+          break;
+      }
     }
 
     return { message: `${message} oleh ${userName}`, Icon };
@@ -65,20 +111,84 @@ function RecentActivityFeed({ limit = 7, technicians = [] }) { // Accept technic
       setLoading(true);
       setError(null);
       try {
-        // 1. Fetch recent logs
-        const { data: logData, error: logError } = await supabase
+        // 1. Fetch recent service order logs
+        const { data: orderLogData, error: orderLogError } = await supabase
           .from('service_order_logs')
-          .select('*, service_order:service_orders(customer_name)') // Join order details if needed
+          .select('*')
           .order('created_at', { ascending: false })
-          .limit(limit);
+          .limit(limit * 2); // Fetch more to account for inventory logs
 
-        if (logError) throw logError;
-        setLogs(logData || []);
+        if (orderLogError) throw orderLogError;
 
-        // 2. Get unique user IDs from the logs
-        const userIds = [...new Set(logData.map(log => log.user_id).filter(id => id))];
+        // 2. Fetch recent inventory logs
+        const { data: inventoryLogData, error: inventoryLogError } = await supabase
+          .from('inventory_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(limit * 2);
 
-        // 3. Fetch user data for those IDs (only if there are IDs to fetch)
+        if (inventoryLogError) throw inventoryLogError;
+
+        // 3. Fetch service orders for customer names
+        const orderIds = [...new Set((orderLogData || []).map(log => log.service_order_id).filter(id => id))];
+        let orderMap = {};
+        if (orderIds.length > 0) {
+          const { data: ordersData, error: ordersError } = await supabase
+            .from('service_orders')
+            .select('id, customer_name')
+            .in('id', orderIds);
+          if (ordersError) {
+            console.error("Error fetching service orders:", ordersError);
+          } else {
+            orderMap = (ordersData || []).reduce((map, order) => {
+              map[order.id] = order.customer_name;
+              return map;
+            }, {});
+          }
+        }
+
+        // 4. Fetch inventory items for item names
+        const itemIds = [...new Set((inventoryLogData || []).map(log => log.item_id).filter(id => id))];
+        let itemMap = {};
+        if (itemIds.length > 0) {
+          const { data: itemsData, error: itemsError } = await supabase
+            .from('inventory_items')
+            .select('id, name')
+            .in('id', itemIds);
+          if (itemsError) {
+            console.error("Error fetching inventory items:", itemsError);
+          } else {
+            itemMap = (itemsData || []).reduce((map, item) => {
+              map[item.id] = item.name;
+              return map;
+            }, {});
+          }
+        }
+
+        // 5. Enrich and combine logs
+        const enrichedOrderLogs = (orderLogData || []).map(log => ({
+          ...log,
+          customer_name: orderMap[log.service_order_id] || null,
+          log_type: 'service_order'
+        }));
+
+        const enrichedInventoryLogs = (inventoryLogData || []).map(log => ({
+          ...log,
+          item_name: itemMap[log.item_id] || null,
+          log_type: 'inventory'
+        }));
+
+        // Combine and sort by created_at
+        const combinedLogs = [...enrichedOrderLogs, ...enrichedInventoryLogs]
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          .slice(0, limit); // Take only the requested limit
+
+        setLogs(combinedLogs);
+
+        // 6. Get unique user IDs from all logs
+        const userIds = [...new Set(combinedLogs.map(log => log.user_id).filter(id => id))];
+
+        // 7. Fetch user data for those IDs
         if (userIds.length > 0) {
           const { data: userData, error: userError } = await supabase
             .from('users')

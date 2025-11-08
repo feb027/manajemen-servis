@@ -103,25 +103,25 @@ serve(async (req)=>{
     }
     // --- AKHIR KONFIRMASI MANUAL ---
 
-    // 8. Create the User Profile in public 'users' table
+    // 8. Update the User Profile in public 'users' table (trigger sudah auto-create dengan role default)
     const { error: profileError } = await adminSupabaseClient.from('users')
-      .insert({
-        id: newUserId, // Use newUserId which is guaranteed to be string here
+      .update({
         full_name: userData.full_name,
-        email: userData.email,
-        role: userData.role
-      });
+        role: userData.role,
+        phone_number: userData.phone_number || null
+      })
+      .eq('id', newUserId);
 
     if (profileError) {
-      console.error(`Auth user ${newUserId} created and confirmed, but failed to create profile:`, profileError);
-      // Coba hapus auth user jika profil gagal dibuat
+      console.error(`Auth user ${newUserId} created and confirmed, but failed to update profile:`, profileError);
+      // Coba hapus auth user jika profil gagal diupdate
       if (newUserId && adminSupabaseClient) {
           await adminSupabaseClient.auth.admin.deleteUser(newUserId);
-          console.warn(`Attempted to delete orphaned Auth user ${newUserId} due to profile creation failure.`);
+          console.warn(`Attempted to delete orphaned Auth user ${newUserId} due to profile update failure.`);
       }
-      throw new Error(`Failed to create user profile: ${profileError.message}`);
+      throw new Error(`Failed to update user profile: ${profileError.message}`);
     }
-    console.log(`User profile created successfully for: ${newUserId}`);
+    console.log(`User profile updated successfully for: ${newUserId}`);
 
     // 9. Return Success Response
     return new Response(JSON.stringify({
