@@ -56,3 +56,4 @@ tmp
 *.pid.lock.*
 *.orig
 *.rej
+*.docx.md

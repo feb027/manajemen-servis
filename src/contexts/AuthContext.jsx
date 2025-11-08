@@ -152,6 +152,16 @@ export function AuthProvider({ children }) {
   };
 
 
+  // Function to manually refresh user data
+  const refreshUser = async () => {
+    if (session?.user) {
+      console.log('[refreshUser] Manually refreshing user data...');
+      await fetchUserData(session.user);
+    } else {
+      console.log('[refreshUser] No session found, cannot refresh user data.');
+    }
+  };
+
   // Nilai yang disediakan oleh context
   const value = {
     session,
@@ -159,6 +169,7 @@ export function AuthProvider({ children }) {
     login,
     logout,
     signup, // Tambahkan signup
+    refreshUser, // Tambahkan refreshUser
     loading: loadingInitial || loadingUser, // Combine loading states for consumers if needed
     loadingInitial, // Expose initial loading state separately
     loadingUser, // Expose user fetch loading state separately

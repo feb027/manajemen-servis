@@ -39,7 +39,12 @@ const calculatePasswordStrength = (password) => {
 };
 
 function ProfileSettings() {
-  const { user, refreshUser } = useAuth();
+  const { user, session, refreshUser } = useAuth();
+  
+  // Debug: Log untuk memastikan refreshUser ada
+  console.log('[ProfileSettings] refreshUser type:', typeof refreshUser);
+  console.log('[ProfileSettings] refreshUser exists:', !!refreshUser);
+  
   const [email, setEmail] = useState('');
 
   const [displayName, setDisplayName] = useState('');
@@ -60,16 +65,17 @@ function ProfileSettings() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      setEmail(user.email || '');
-      const currentDisplayName = user.user_metadata?.full_name || '';
-      const currentPhoneNumber = user.user_metadata?.phone_number || '';
+    // Use session.user for user_metadata, user from context is from 'users' table
+    if (session?.user) {
+      setEmail(session.user.email || '');
+      const currentDisplayName = session.user.user_metadata?.full_name || user?.full_name || '';
+      const currentPhoneNumber = session.user.user_metadata?.phone_number || '';
       setDisplayName(currentDisplayName);
       setEditedDisplayName(currentDisplayName);
       setPhoneNumber(currentPhoneNumber);
       setEditedPhoneNumber(currentPhoneNumber);
     }
-  }, [user]);
+  }, [session?.user, user]);
 
   // Reset edited name/phone if original changes
   useEffect(() => {
@@ -79,6 +85,8 @@ function ProfileSettings() {
 
   const handleProfileUpdate = async (e) => {
       e.preventDefault();
+      console.log('[handleProfileUpdate] Starting profile update...');
+      
       const trimmedName = editedDisplayName.trim();
       const trimmedPhone = editedPhoneNumber.trim();
 
@@ -92,7 +100,7 @@ function ProfileSettings() {
       }
 
       setIsSavingProfile(true);
-      toast.loading('Menyimpan info profil...');
+      const loadingToast = toast.loading('Menyimpan info profil...');
 
       // Prepare data to update
       const updateData = {};
@@ -104,28 +112,58 @@ function ProfileSettings() {
           updateData.phone_number = trimmedPhone || null; // Save null if empty
       }
 
+      console.log('[handleProfileUpdate] Update data:', updateData);
+
       try {
-          const { error } = await supabase.auth.updateUser({
-              data: updateData // Update metadata with potentially multiple fields
+          // 1. Update Supabase Auth user_metadata
+          const { error: authError } = await supabase.auth.updateUser({
+              data: updateData
           });
 
-          toast.dismiss();
+          console.log('[handleProfileUpdate] Supabase auth update completed, error:', authError);
+          
+          if (authError) throw authError;
 
-          if (error) throw error;
+          // 2. Update users table (sync full_name)
+          if ('full_name' in updateData && user?.id) {
+              console.log('[handleProfileUpdate] Syncing full_name to users table...');
+              const { error: dbError } = await supabase
+                  .from('users')
+                  .update({ full_name: updateData.full_name })
+                  .eq('id', user.id);
+              
+              if (dbError) {
+                  console.error('[handleProfileUpdate] Error updating users table:', dbError);
+                  // Don't throw, auth update already succeeded
+              }
+          }
+          
+          toast.dismiss(loadingToast);
 
           // Update local state only for fields that were changed
           if ('full_name' in updateData) setDisplayName(trimmedName);
           if ('phone_number' in updateData) setPhoneNumber(trimmedPhone || '');
 
+          console.log('[handleProfileUpdate] Showing success toast...');
           toast.success("Informasi profil berhasil diperbarui.");
-          refreshUser();
+          
+          // Refresh user data if refreshUser function exists
+          console.log('[handleProfileUpdate] Checking refreshUser...', typeof refreshUser);
+          if (refreshUser && typeof refreshUser === 'function') {
+              console.log('[handleProfileUpdate] Calling refreshUser...');
+              await refreshUser();
+              console.log('[handleProfileUpdate] refreshUser completed');
+          } else {
+              console.warn('[handleProfileUpdate] refreshUser not available or not a function');
+          }
 
       } catch (error) {
-          console.error("Error updating profile:", error);
-          toast.dismiss();
+          console.error("[handleProfileUpdate] Error updating profile:", error);
+          toast.dismiss(loadingToast);
           toast.error(`Gagal memperbarui profil: ${error.message}`);
       } finally {
           setIsSavingProfile(false);
+          console.log('[handleProfileUpdate] Profile update process finished');
       }
   };
 
