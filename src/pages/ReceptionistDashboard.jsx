@@ -37,7 +37,7 @@ function StatCard({ title, value, isLoading, icon, colorClass = 'bg-[#0ea5e9]', 
   );
 }
 
-const STATUS_OPTIONS = ['Semua', 'Baru', 'Dikerjakan', 'Selesai', 'Dibatalkan'];
+const STATUS_OPTIONS = ['Semua', 'Baru', 'Diproses', 'Selesai', 'Dibatalkan'];
 const ITEMS_PER_PAGE = 10;
 const MODAL_ANIMATION_DURATION = 300;
 
@@ -381,7 +381,7 @@ function ReceptionistDashboard() {
     }
   };
 
-  const handleConfirmStatusUpdate = async (orderId, newStatus) => {
+  const handleConfirmStatusUpdate = async (orderId, newStatus, updateData = {}) => {
     if (!orderId || !newStatus) return;
 
     const originalOrder = serviceOrders.find(o => o.id === orderId);
@@ -401,9 +401,20 @@ function ReceptionistDashboard() {
         return; // Stop the update process
     }
 
-    console.log(`Updating status for order ${orderId} to ${newStatus}`);
+    console.log(`Updating status for order ${orderId} to ${newStatus}`, updateData);
     try {
-        const { error: updateDbError } = await supabase.from('service_orders').update({ status: newStatus, updated_at: new Date() }).eq('id', orderId);
+        // Merge status with additional update data (time tracking fields)
+        const fullUpdateData = {
+            ...updateData,
+            status: newStatus,
+            updated_at: new Date()
+        };
+        
+        const { error: updateDbError } = await supabase
+            .from('service_orders')
+            .update(fullUpdateData)
+            .eq('id', orderId);
+            
         if (updateDbError) throw updateDbError; // Throw Supabase error to catch block
         setToastMessage('Status order berhasil diperbarui!'); // Use setToastMessage for success
         triggerCloseModal();

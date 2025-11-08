@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabase/supabaseClient';
 import { FiX, FiUser, FiPhone, FiSmartphone, FiPrinter, FiMonitor, FiPackage, FiTag, FiAlignLeft, FiLoader, FiCheckCircle, FiAlertTriangle, FiPlusCircle, FiDollarSign } from 'react-icons/fi';
 import Select from 'react-select';
+import TimeEstimationInput from './TimeEstimationInput';
 
 // Initial state for the main form (device/complaint focused now)
 const initialFormData = {
@@ -10,6 +11,8 @@ const initialFormData = {
   serialNumber: '',
   customerComplaint: '',
   cost: '',
+  estimatedDurationHours: '',
+  estimatedCompletionTime: '',
 };
 
 // Initial state for the new customer part of the form
@@ -79,6 +82,14 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
       setOtherDeviceType('');
     }
      setError(null);
+  };
+
+  const handleDurationChange = (hours) => {
+    setFormData(prevData => ({ ...prevData, estimatedDurationHours: hours }));
+  };
+
+  const handleCompletionTimeChange = (time) => {
+    setFormData(prevData => ({ ...prevData, estimatedCompletionTime: time }));
   };
 
   const handleOtherDeviceChange = (e) => {
@@ -204,6 +215,8 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
             serial_number: formData.serialNumber || null,
             customer_complaint: formData.customerComplaint,
             cost: formData.cost === '' ? null : Number(formData.cost),
+            estimated_duration_hours: formData.estimatedDurationHours === '' ? null : Number(formData.estimatedDurationHours),
+            estimated_completion_time: formData.estimatedCompletionTime || null,
         };
 
          console.log("Attempting to insert service order:", serviceOrderData);
@@ -469,6 +482,14 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
                     </div>
                 </div>
             </fieldset>
+
+            <TimeEstimationInput
+              estimatedDurationHours={formData.estimatedDurationHours}
+              estimatedCompletionTime={formData.estimatedCompletionTime}
+              onDurationChange={handleDurationChange}
+              onCompletionTimeChange={handleCompletionTimeChange}
+              disabled={isLoading}
+            />
         </div>
 
         <div className="flex justify-end space-x-3 p-4 bg-gray-50 border-t rounded-b-lg flex-shrink-0">

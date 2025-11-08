@@ -63,8 +63,26 @@ function UpdateStatusModal({ order, onClose, onConfirm }) { // Keep onConfirm fo
       setIsSubmitting(true);
       setSubmitError('');
       try {
+          // Prepare update data
+          const updateData = { status: newStatus };
+          
+          // Auto-start work time when status changes to "Diproses"
+          if (newStatus === 'Diproses' && !order.actual_start_time) {
+              updateData.actual_start_time = new Date().toISOString();
+          }
+          
+          // Auto-complete work time when status changes to "Selesai"
+          if (newStatus === 'Selesai' && order.actual_start_time && !order.actual_completion_time) {
+              const startTime = new Date(order.actual_start_time);
+              const endTime = new Date();
+              const durationHours = (endTime - startTime) / (1000 * 60 * 60);
+              
+              updateData.actual_completion_time = endTime.toISOString();
+              updateData.actual_duration_hours = durationHours;
+          }
+          
           // Use the passed handler (onConfirm or potentially onUpdate)
-          await onConfirm(order.id, newStatus); 
+          await onConfirm(order.id, newStatus, updateData); 
       } catch (error) {
           console.error("Error updating status:", error);
           setSubmitError(`Gagal update: ${error.message || 'Terjadi kesalahan'}`);

@@ -95,10 +95,20 @@ export function AuthProvider({ children }) {
 
   // Fungsi logout
   const logout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setUser(null); // Langsung set null di state
-    setSession(null);
+    try {
+      const { error } = await supabase.auth.signOut();
+      // Ignore "Auth session missing" error - session might already be cleared
+      if (error && error.message !== 'Auth session missing!') {
+        console.error('[logout] Error during signOut:', error);
+        throw error;
+      }
+    } finally {
+      // Always clear local state, even if signOut fails
+      setUser(null);
+      setSession(null);
+      currentUserIdRef.current = null;
+      console.log('[logout] Local state cleared');
+    }
   };
 
   // Fungsi signup (contoh dasar)

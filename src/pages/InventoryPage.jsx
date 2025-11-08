@@ -9,6 +9,7 @@ import InventoryFormModal from '../components/InventoryFormModal'; // Import mod
 import Toast from '../components/Toast'; // Import Toast component
 import InventoryHistoryModal from '../components/InventoryHistoryModal'; // Import History Modal
 import ConfirmModal from '../components/ConfirmModal'; // Import Confirm Modal
+import { useAuth } from '../contexts/AuthContext'; // Import useAuth
 
 // Helper function to format currency
 const formatCurrency = (value) => {
@@ -21,6 +22,9 @@ const formatCurrency = (value) => {
 const ITEMS_PER_PAGE = 10;
 
 function InventoryPage() {
+  const { user } = useAuth(); // Get user for role checking
+  const isReadOnly = user?.role === 'technician'; // Technician has read-only access
+  
   const [allInventoryItems, setAllInventoryItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -778,6 +782,19 @@ function InventoryPage() {
           message={toastMessage} 
           onClose={() => setToastMessage('')} 
       />
+      
+      {/* Read-Only Mode Banner for Technician */}
+      {isReadOnly && (
+        <div className="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-lg">
+          <div className="flex items-center">
+            <FiAlertTriangle className="h-5 w-5 text-yellow-600 mr-3" />
+            <div>
+              <p className="text-sm font-medium text-yellow-800">Mode Hanya Baca</p>
+              <p className="text-xs text-yellow-700 mt-1">Anda hanya dapat melihat data inventaris. Untuk mengedit, hubungi Admin atau Resepsionis.</p>
+            </div>
+          </div>
+        </div>
+      )}
     
       
       {/* Summary Cards Section */} 
@@ -991,8 +1008,8 @@ function InventoryPage() {
                       </Transition>
                   </Menu>
 
-                  {/* Delete Selected Button (Conditional) */} 
-                  {selectedItemIds.size > 0 && (
+                  {/* Delete Selected Button (Conditional) - Hide for read-only */} 
+                  {!isReadOnly && selectedItemIds.size > 0 && (
                       <button
                           onClick={handleDeleteSelected}
                           className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1032,13 +1049,15 @@ function InventoryPage() {
                       </button>
                   )}
               </div>
-              {/* Add Item Button */} 
-              <button
-                  onClick={() => openModal(null)} 
-                  className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 bg-blue-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:border-blue-800 focus:ring focus:ring-blue-300 disabled:opacity-25 transition whitespace-nowrap"
-              >
-                  <FiPlus className="-ml-0.5 mr-1.5 h-4 w-4"/> Tambah Item
-              </button>
+              {/* Add Item Button - Hide for read-only */} 
+              {!isReadOnly && (
+                <button
+                    onClick={() => openModal(null)} 
+                    className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 bg-blue-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:border-blue-800 focus:ring focus:ring-blue-300 disabled:opacity-25 transition whitespace-nowrap"
+                >
+                    <FiPlus className="-ml-0.5 mr-1.5 h-4 w-4"/> Tambah Item
+                </button>
+              )}
           </div>
       </div>
 
@@ -1067,7 +1086,7 @@ function InventoryPage() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-100">
                   <tr>
-                    {/* Checkbox Header */} 
+                    {/* Checkbox Header - Disable for read-only */} 
                     <th scope="col" className="p-4">
                       <div className="flex items-center">
                         <input
@@ -1077,7 +1096,7 @@ function InventoryPage() {
                           checked={isAllSelectedOnPage}
                           ref={el => el && (el.indeterminate = isSomeSelectedOnPage)}
                           onChange={handleSelectAllOnPage}
-                          disabled={paginatedItems.length === 0} // Disable if no items on page
+                          disabled={isReadOnly || paginatedItems.length === 0} // Disable for read-only or no items
                         />
                         <label htmlFor="checkbox-all-search" className="sr-only">checkbox</label>
                       </div>
@@ -1139,7 +1158,7 @@ function InventoryPage() {
                         key={item.id}
                         className={`group transition duration-150 ease-in-out ${selectedItemIds.has(item.id) ? 'bg-blue-100' : 'odd:bg-white even:bg-gray-50'} hover:bg-blue-50`} // Added group class for hover effect
                       >
-                        {/* Checkbox Cell */} 
+                        {/* Checkbox Cell - Disable for read-only */} 
                         <td className="w-4 p-4">
                            <div className="flex items-center">
                             <input
@@ -1148,6 +1167,7 @@ function InventoryPage() {
                               className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                               checked={selectedItemIds.has(item.id)}
                               onChange={() => handleSelectItem(item.id)}
+                              disabled={isReadOnly} // Disable for read-only
                             />
                             <label htmlFor={`checkbox-table-search-${item.id}`} className="sr-only">checkbox</label>
                           </div>
@@ -1162,48 +1182,57 @@ function InventoryPage() {
                         <td className={`px-6 py-4 whitespace-nowrap text-sm ${item.stock <= dynamicLowStockThreshold ? 'text-red-600 font-semibold' : 'text-gray-500'}`}> 
                           <div className="flex items-center justify-between"> {/* Use flex to position buttons */} 
                             <span>{item.stock}</span>
-                            <div className="flex items-center space-x-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150"> {/* Buttons appear on hover */} 
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); handleAdjustStock(item, -1); }} 
-                                className="text-red-500 hover:text-red-700 disabled:opacity-30 p-0.5 rounded focus:outline-none focus:ring-1 focus:ring-red-400 cursor-pointer"
-                                title="Kurangi Stok (-1)"
-                                disabled={item.stock <= 0} // Disable if stock is 0
-                              >
-                                <FiMinusCircle className="h-4 w-4" />
-                              </button>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); handleAdjustStock(item, 1); }} 
-                                className="text-green-500 hover:text-green-700 p-0.5 rounded focus:outline-none focus:ring-1 focus:ring-green-400 cursor-pointer"
-                                title="Tambah Stok (+1)"
-                              >
-                                <FiPlusCircle className="h-4 w-4" />
-                              </button>
-                            </div>
+                            {/* Quick stock adjustment - Hide for read-only */}
+                            {!isReadOnly && (
+                              <div className="flex items-center space-x-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150"> {/* Buttons appear on hover */} 
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handleAdjustStock(item, -1); }} 
+                                  className="text-red-500 hover:text-red-700 disabled:opacity-30 p-0.5 rounded focus:outline-none focus:ring-1 focus:ring-red-400 cursor-pointer"
+                                  title="Kurangi Stok (-1)"
+                                  disabled={item.stock <= 0} // Disable if stock is 0
+                                >
+                                  <FiMinusCircle className="h-4 w-4" />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handleAdjustStock(item, 1); }} 
+                                  className="text-green-500 hover:text-green-700 p-0.5 rounded focus:outline-none focus:ring-1 focus:ring-green-400 cursor-pointer"
+                                  title="Tambah Stok (+1)"
+                                >
+                                  <FiPlusCircle className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatCurrency(item.price)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-1"> 
+                          {/* View history button - always visible */}
                           <button
-                            onClick={(e) => { e.stopPropagation(); openHistoryModal(item); }} // Prevent row select, open history
+                            onClick={(e) => { e.stopPropagation(); openHistoryModal(item); }}
                             className="text-cyan-600 hover:text-cyan-900 hover:bg-cyan-100 p-1 rounded transition duration-150 ease-in-out cursor-pointer"
                             title="Lihat Riwayat Perubahan"
                           >
                             <FiClock className="h-4 w-4"/>
                           </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleEdit(item); }} // Prevent row select
-                            className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100 p-1 rounded transition duration-150 ease-in-out cursor-pointer"
-                            title="Edit Item"
-                          >
-                            <FiEdit2 className="h-4 w-4"/>
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.name); }} // Pass name too
-                            className="text-red-600 hover:text-red-900 hover:bg-red-100 p-1 rounded transition duration-150 ease-in-out cursor-pointer"
-                            title="Hapus Item" // Tooltip added
-                          >
-                            <FiTrash2 className="h-4 w-4"/>
-                          </button>
+                          {/* Edit and Delete buttons - Hide for read-only */}
+                          {!isReadOnly && (
+                            <>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleEdit(item); }}
+                                className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100 p-1 rounded transition duration-150 ease-in-out cursor-pointer"
+                                title="Edit Item"
+                              >
+                                <FiEdit2 className="h-4 w-4"/>
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.name); }}
+                                className="text-red-600 hover:text-red-900 hover:bg-red-100 p-1 rounded transition duration-150 ease-in-out cursor-pointer"
+                                title="Hapus Item"
+                              >
+                                <FiTrash2 className="h-4 w-4"/>
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))

@@ -3,6 +3,7 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { FiX, FiUser, FiPhone, FiMail, FiCalendar, FiTag, FiClipboard, FiTool, FiDollarSign, FiArchive, FiEdit3, FiInfo, FiPrinter, FiClock, FiActivity, FiCheckSquare, FiPlusCircle, FiUserCheck, FiMessageSquare, FiPaperclip, FiLoader } from 'react-icons/fi';
 import { supabase } from '../supabase/supabaseClient';
+import TimeEstimationDisplay from './TimeEstimationDisplay';
 
 // Helper to format date/time
 const formatDateTime = (dateString) => {
@@ -57,7 +58,7 @@ function DetailItem({ label, value, icon, className = '', preserveWhitespace = f
 // --- Helper Function to Render Log Entry ---
 const renderLogEntry = (log, users = []) => {
   const user = users.find(u => u.id === log.user_id);
-  const userName = user ? user.full_name : (log.user_id ? `User (${log.user_id.substring(0, 6)}...)` : 'Sistem');
+  const userName = user ? user.full_name : 'Sistem';
   const time = formatDateTime(log.created_at);
   let message = 'Aksi tidak diketahui';
   let Icon = FiActivity;
@@ -66,23 +67,35 @@ const renderLogEntry = (log, users = []) => {
     case 'CREATED':
       message = `Order dibuat oleh ${userName}.`;
       Icon = FiPlusCircle;
-      // Optionally add details: ` Status awal: ${log.details?.status || 'Baru'}.`
       break;
     case 'STATUS_CHANGED':
-      message = `Status diubah dari "${log.details?.old || 'N/A'}" menjadi "${log.details?.new || 'N/A'}" oleh ${userName}.`;
-      Icon = FiCheckSquare;
+      // Handle both old/new and old_status/new_status formats
+      {
+        const oldStatus = log.details?.old || log.details?.old_status || 'N/A';
+        const newStatus = log.details?.new || log.details?.new_status || 'N/A';
+        
+        // Skip if both are N/A or same (duplicate logs)
+        if (oldStatus === 'N/A' && newStatus === 'N/A') {
+          return null;
+        }
+        
+        message = `Status diubah dari "${oldStatus}" menjadi "${newStatus}" oleh ${userName}.`;
+        Icon = FiCheckSquare;
+      }
       break;
     case 'TECHNICIAN_ASSIGNED':
-      // Add block scope for lexical declarations
       {
         const oldTechId = log.details?.old_id;
-        const newTechId = log.details?.new_id;
+        const newTechId = log.details?.new_id || log.details?.technician_id;
         const newTech = users.find(u => u.id === newTechId);
-        const newTechName = newTech ? newTech.full_name : (newTechId ? `ID (${newTechId.substring(0,6)}...)` : 'Tidak Ada');
+        const newTechName = newTech ? newTech.full_name : 'Tidak Ada';
+        
         if (oldTechId) {
-           message = `Teknisi diganti dari ${users.find(u => u.id === oldTechId)?.full_name || 'Sebelumnya'} menjadi ${newTechName} oleh ${userName}.`;
+          const oldTech = users.find(u => u.id === oldTechId);
+          const oldTechName = oldTech ? oldTech.full_name : 'Sebelumnya';
+          message = `Teknisi diganti dari ${oldTechName} menjadi ${newTechName} oleh ${userName}.`;
         } else {
-           message = `Teknisi ${newTechName} ditugaskan oleh ${userName}.`;
+          message = `Teknisi ${newTechName} ditugaskan oleh ${userName}.`;
         }
         Icon = FiUserCheck;
       }
@@ -93,7 +106,6 @@ const renderLogEntry = (log, users = []) => {
       break;
     case 'NOTES_UPDATED':
       message = `Catatan servis diperbarui oleh ${userName}.`;
-      // Optionally add: ` Ringkasan: ${log.details?.summary_new}`
       Icon = FiMessageSquare;
       break;
     case 'PARTS_UPDATED':
@@ -123,13 +135,55 @@ const renderLogEntry = (log, users = []) => {
 // --- End Log Entry Renderer ---
 
 // Revert props: Remove isOpen, isClosing
-function ServiceOrderDetailModal({ order, technicians = [], onClose }) { 
+function ServiceOrderDetailModal({ order: initialOrder, technicians = [], onClose }) { 
   const componentRef = useRef();
+  
+  // State for current order data (can be refreshed)
+  const [order, setOrder] = useState(initialOrder);
+  const [loadingOrder, setLoadingOrder] = useState(false);
+  
   // ... state for logs ...
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState(null);
-  const [allUsers, setAllUsers] = useState([]); 
+  const [allUsers, setAllUsers] = useState([]);
+  
+  // Function to refresh order data
+  const refreshOrderData = async () => {
+    if (!order?.id) return;
+    
+    console.log('[ServiceOrderDetailModal] Refreshing order data for ID:', order.id);
+    setLoadingOrder(true);
+    try {
+      const { data, error } = await supabase
+        .from('service_orders')
+        .select('*')
+        .eq('id', order.id)
+        .single();
+        
+      if (error) throw error;
+      console.log('[ServiceOrderDetailModal] Order data refreshed:', data);
+      setOrder(data);
+    } catch (err) {
+      console.error("Error refreshing order data:", err);
+    } finally {
+      setLoadingOrder(false);
+    }
+  };
+  
+  // Update order state when initialOrder prop changes and fetch fresh data
+  useEffect(() => {
+    console.log('[ServiceOrderDetailModal] initialOrder changed:', initialOrder?.id);
+    setOrder(initialOrder);
+    // Fetch fresh data when modal opens
+    if (initialOrder?.id) {
+      // Small delay to ensure database write has completed
+      const timer = setTimeout(() => {
+        refreshOrderData();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [initialOrder?.id]); // eslint-disable-line react-hooks/exhaustive-deps 
 
   // ... handlePrint hook ...
   const handlePrint = useReactToPrint({
@@ -144,20 +198,28 @@ function ServiceOrderDetailModal({ order, technicians = [], onClose }) {
         setLoadingLogs(true);
         setLogsError(null);
         try {
+            // Fetch logs
             const { data: logData, error: logFetchError } = await supabase
-              .from('service_order_logs')
-              .select('*, user:users(id, full_name)') 
+              .from('service_order_logs_backup')
+              .select('*') 
               .eq('service_order_id', order.id)
               .order('created_at', { ascending: false });
             if (logFetchError) throw logFetchError;
             setLogs(logData || []);
 
+            // Fetch all users for name mapping
+            const { data: userData, error: userFetchError } = await supabase
+              .from('users')
+              .select('id, full_name, email');
+            if (userFetchError) throw userFetchError;
+            
+            // Combine with technicians
             let usersMap = new Map();
             technicians.forEach(t => usersMap.set(t.id, t)); 
-            logData.forEach(log => {
-                if (log.user && !usersMap.has(log.user.id)) {
-                    usersMap.set(log.user.id, log.user); 
-                }
+            userData?.forEach(u => {
+              if (!usersMap.has(u.id)) {
+                usersMap.set(u.id, u);
+              }
             });
             setAllUsers(Array.from(usersMap.values()));
           } catch (err) {
@@ -185,17 +247,15 @@ function ServiceOrderDetailModal({ order, technicians = [], onClose }) {
 
   // Revert: Remove outer modal wrappers and transition classes
   return (
-    // Original root div
+    // Original root div - Remove h-full, add max-h for scroll
     <div
-      className="bg-white rounded-lg shadow-xl w-full sm:max-w-3xl flex flex-col print:shadow-none print:border print:border-gray-300 overflow-hidden h-full"
-      // Remove onClick stopPropagation if it was part of the modal structure attempt
-      // onClick={(e) => e.stopPropagation()} 
+      className="bg-white rounded-lg shadow-xl w-full sm:max-w-3xl max-h-[90vh] flex flex-col print:shadow-none print:border print:border-gray-300 overflow-hidden"
     >
       {/* Header - Keep updated layout if desired */}
       <div className="flex justify-between items-center p-4 px-5 border-b bg-gray-50 rounded-t-lg flex-shrink-0 gap-4 print:hidden">
          <h2 id="order-detail-title" className="text-lg font-semibold text-gray-800 flex items-center">
             <FiInfo className="h-5 w-5 mr-2 text-[#0ea5e9] flex-shrink-0"/> 
-            <span className="truncate">Detail Order Servis #{String(order.id)?.substring(0, 8)}</span>
+            <span className="truncate">Detail Order: {order.customer_name} - {order.device_type}</span>
          </h2>
          <div className="flex items-center gap-3 flex-shrink-0">
             {displayStatus(order.status)} 
@@ -245,13 +305,26 @@ function ServiceOrderDetailModal({ order, technicians = [], onClose }) {
                    <DetailItem label="Terakhir Update" value={formatDateTime(order.updated_at)} icon={FiClock}/>
                </div>
           </section>
+          
+          {/* Time Estimation Section */}
+          <section className="mt-4 pt-4 border-t border-gray-200 print:hidden">
+            <TimeEstimationDisplay 
+              order={order} 
+              onUpdate={refreshOrderData} 
+            />
+          </section>
+          
           {/* Order History Section */} 
            <section className="mt-4 pt-4 border-t border-gray-200 print:border-t-0">
                <h3 className="text-sm font-semibold text-[#0ea5e9] border-b pb-1 mb-3 flex items-center"><FiClock className="h-4 w-4 mr-2"/> Riwayat Order</h3>
                 {loadingLogs && <div className="flex items-center justify-center text-gray-500 py-4"><FiLoader className="animate-spin h-4 w-4 mr-2"/> Memuat riwayat...</div>}
                 {logsError && <p className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">Error: {logsError}</p>}
                 {!loadingLogs && !logsError && logs.length === 0 && <p className="text-sm text-gray-500 italic">Belum ada riwayat untuk order ini.</p>}
-                {!loadingLogs && !logsError && logs.length > 0 && <ol className="relative border-l border-gray-200 ml-3">{logs.map(log => renderLogEntry(log, allUsers))}</ol>}
+                {!loadingLogs && !logsError && logs.length > 0 && (
+                  <ol className="relative border-l border-gray-200 ml-3">
+                    {logs.map(log => renderLogEntry(log, allUsers)).filter(Boolean)}
+                  </ol>
+                )}
            </section>
            {/* Printed signature area */}
             <div className="mt-8 pt-4 border-t border-dashed border-gray-400 hidden print:block">

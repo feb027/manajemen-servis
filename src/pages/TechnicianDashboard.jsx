@@ -362,13 +362,20 @@ function TechnicianDashboard() {
       };
   }, [isStatusModalOpen, isDetailModalOpen, isTechEditModalOpen, triggerCloseModal]); // Add triggerCloseModal here
 
-  const handleConfirmStatusUpdate = async (orderId, newStatus) => {
+  const handleConfirmStatusUpdate = async (orderId, newStatus, updateData = {}) => {
     if (!orderId || !newStatus) return;
 
     try {
+      // Merge status with additional update data (time tracking fields)
+      const fullUpdateData = {
+          ...updateData,
+          status: newStatus,
+          updated_at: new Date()
+      };
+      
       const { error: updateError } = await supabase
         .from('service_orders')
-        .update({ status: newStatus, updated_at: new Date() })
+        .update(fullUpdateData)
         .eq('id', orderId);
 
       if (updateError) throw updateError;
@@ -1010,7 +1017,6 @@ function TechnicianDashboard() {
             {/* Inner wrapper for content and transition */}
             <div 
                 className={`transform transition-all duration-${MODAL_ANIMATION_DURATION} ease-in-out ${isDetailModalMounted && !isDetailModalClosing ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
-                style={{ maxHeight: '90vh', maxWidth: 'calc(100vw - 2rem)' }} 
                 onClick={(e) => e.stopPropagation()} 
             >
                 <ServiceOrderDetailModal

@@ -26,7 +26,7 @@ const formatCurrency = (value) => {
 // Pass technicians list specifically for technician assignment lookup
 const getActivityDetails = (log, users = [], technicians = []) => { 
     const user = users.find(u => u.id === log.user_id);
-    const userName = user ? user.full_name : (log.user_id ? `User (${log.user_id.substring(0, 6)}...)` : 'Sistem');
+    const userName = user ? user.full_name : 'Sistem';
     let message = 'Aksi tidak diketahui';
     let Icon = FiActivity;
     
@@ -34,21 +34,52 @@ const getActivityDetails = (log, users = [], technicians = []) => {
     if (log.service_order_id) {
       const customerName = log.customer_name || 'Customer';
       switch (log.event_type) {
-        case 'CREATED': message = `Order untuk ${customerName} dibuat`; Icon = FiPlusCircle; break;
-        case 'STATUS_CHANGED': message = `Order ${customerName} - Status diubah ke "${log.details?.new || 'N/A'}"`; Icon = FiCheckSquare; break;
+        case 'CREATED': 
+          message = `Order untuk ${customerName} dibuat`; 
+          Icon = FiPlusCircle; 
+          break;
+        case 'STATUS_CHANGED': 
+          {
+            // Handle both old/new and old_status/new_status formats
+            const newStatus = log.details?.new || log.details?.new_status;
+            
+            // Skip if new status is N/A or null
+            if (!newStatus || newStatus === 'N/A') {
+              return null;
+            }
+            
+            message = `Order ${customerName} - Status diubah ke "${newStatus}"`;
+            Icon = FiCheckSquare;
+          }
+          break;
         case 'TECHNICIAN_ASSIGNED':
-              {
-                const newTechId = log.details?.new_id;
-                const assignedTechnician = technicians.find(t => t.id === newTechId); 
-                const newTechName = assignedTechnician ? assignedTechnician.full_name : (newTechId ? `ID (${newTechId.substring(0,6)}...)` : 'Tidak Ada');
-                message = `Teknisi ${newTechName} ditugaskan ke order ${customerName}`; Icon = FiUserCheck;
-              }
-              break;
-        case 'COST_UPDATED': message = `Biaya order ${customerName} diupdate menjadi ${formatCurrency(log.details?.new)}`; Icon = FiDollarSign; break;
-        case 'NOTES_UPDATED': message = `Catatan order ${customerName} diperbarui`; Icon = FiMessageSquare; break;
-        case 'PARTS_UPDATED': message = `Sparepart order ${customerName} diperbarui`; Icon = FiTool; break;
-        case 'DETAILS_EDITED': message = `Detail order ${customerName} diedit`; Icon = FiEdit3; break;
-        default: message = `Event: ${log.event_type} pada order ${customerName}`; break;
+          {
+            const newTechId = log.details?.new_id || log.details?.technician_id;
+            const assignedTechnician = technicians.find(t => t.id === newTechId); 
+            const newTechName = assignedTechnician ? assignedTechnician.full_name : 'Tidak Ada';
+            message = `Teknisi ${newTechName} ditugaskan ke order ${customerName}`; 
+            Icon = FiUserCheck;
+          }
+          break;
+        case 'COST_UPDATED': 
+          message = `Biaya order ${customerName} diupdate menjadi ${formatCurrency(log.details?.new)}`; 
+          Icon = FiDollarSign; 
+          break;
+        case 'NOTES_UPDATED': 
+          message = `Catatan order ${customerName} diperbarui`; 
+          Icon = FiMessageSquare; 
+          break;
+        case 'PARTS_UPDATED': 
+          message = `Sparepart order ${customerName} diperbarui`; 
+          Icon = FiTool; 
+          break;
+        case 'DETAILS_EDITED': 
+          message = `Detail order ${customerName} diedit`; 
+          Icon = FiEdit3; 
+          break;
+        default: 
+          message = `Event: ${log.event_type} pada order ${customerName}`; 
+          break;
       }
     } 
     // For inventory events (uses 'action' column, not 'event_type')
@@ -111,9 +142,9 @@ function RecentActivityFeed({ limit = 7, technicians = [] }) { // Accept technic
       setLoading(true);
       setError(null);
       try {
-        // 1. Fetch recent service order logs
+        // 1. Fetch recent service order logs from backup table
         const { data: orderLogData, error: orderLogError } = await supabase
-          .from('service_order_logs')
+          .from('service_order_logs_backup')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(limit * 2); // Fetch more to account for inventory logs
@@ -247,7 +278,13 @@ function RecentActivityFeed({ limit = 7, technicians = [] }) { // Accept technic
            <ul className="space-y-3">
              {logs.map((log) => {
                 // Pass technicians to getActivityDetails
-                const { message, Icon } = getActivityDetails(log, users, technicians); 
+                const details = getActivityDetails(log, users, technicians);
+                
+                // Skip if null (filtered out, like N/A status changes)
+                if (!details) return null;
+                
+                const { message, Icon } = details;
+                
                 return (
                     <li key={log.id} className="flex items-start text-xs">
                       <Icon className="w-3.5 h-3.5 mr-2 mt-0.5 text-gray-500 flex-shrink-0" />
