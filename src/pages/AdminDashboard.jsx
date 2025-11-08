@@ -858,7 +858,7 @@ function AdminDashboard() {
           )}
 
           {activeTab === 'analytics' && (
-             <AnalyticsTab technicians={technicians} orders={allOrders}/>
+             <AnalyticsTab technicians={technicians} orders={allOrders} users={allUsers}/>
           )}
 
           {activeTab === 'activityLog' && (
