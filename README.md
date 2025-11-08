@@ -103,8 +103,6 @@ Aplikasi ini dikembangkan sebagai solusi digital untuk mengelola proses servis b
 
 ## 📸 Screenshots
 
-> **Note:** Place your screenshots in a `docs/screenshots/` folder in the project root
-
 ### Admin Dashboard
 ![Admin Dashboard](docs/screenshots/admin-dashboard.png)
 *Complete control panel with analytics, user management, and system settings*
@@ -119,6 +117,7 @@ Aplikasi ini dikembangkan sebagai solusi digital untuk mengelola proses servis b
 
 ### Time Tracking
 ![Time Tracking](docs/screenshots/time-tracking.png)
+
 *Real-time work tracking with estimated vs actual duration comparison*
 
 ### Analytics
