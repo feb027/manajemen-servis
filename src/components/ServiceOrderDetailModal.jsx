@@ -140,7 +140,7 @@ function ServiceOrderDetailModal({ order: initialOrder, technicians = [], onClos
   
   // State for current order data (can be refreshed)
   const [order, setOrder] = useState(initialOrder);
-  const [loadingOrder, setLoadingOrder] = useState(false);
+  const [setLoadingOrder] = useState(false);
   
   // ... state for logs ...
   const [logs, setLogs] = useState([]);
