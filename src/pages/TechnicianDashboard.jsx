@@ -66,17 +66,45 @@ function TechnicianDashboard() {
   // Wrap fetch functions in useCallback for stable references
   const fetchTechnicianViewOrders = useCallback(async () => {
     try {
+      // Get current logged-in user ID and role
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError) throw authError;
+      if (!user) throw new Error('User tidak terautentikasi');
+      
+      // Fetch user details to check role
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      
+      if (userError) throw userError;
+      
+      console.log('[TechnicianDashboard] Fetching orders for user:', user.id, 'role:', userData?.role);
+
       let query = supabase
         .from('service_orders')
         .select('*');
 
-      query = query.not('assigned_technician_id', 'is', null)
-                   .order('created_at', { ascending: false });
+      // Admin can see ALL orders, Technician only sees their assigned orders
+      if (userData?.role === 'admin') {
+        // Admin: fetch ALL orders with assigned technician
+        query = query.not('assigned_technician_id', 'is', null);
+        console.log('[TechnicianDashboard] Admin mode: fetching all assigned orders');
+      } else {
+        // Technician: fetch only orders assigned to this user
+        query = query.eq('assigned_technician_id', user.id);
+        console.log('[TechnicianDashboard] Technician mode: fetching only own orders');
+      }
+      
+      query = query.order('created_at', { ascending: false });
 
       const { data, error: fetchError } = await query;
 
       if (fetchError) throw fetchError;
 
+      console.log('[TechnicianDashboard] Fetched orders count:', data?.length || 0);
       setAllFetchedOrders(data || []); // Store raw data
     } catch (err) {
       console.error("Error fetching technician view orders:", err);
@@ -395,16 +423,42 @@ function TechnicianDashboard() {
   // Save Technician Edits (New)
   const handleSaveTechEdit = async (orderId, updatedData) => {
       try {
-          const { error } = await supabase
+          console.log('[TechnicianDashboard] Saving tech edit for order:', orderId, updatedData);
+          
+          const { data: updatedOrders, error } = await supabase
               .from('service_orders')
               .update({ 
                   notes: updatedData.notes, 
                   parts_used: updatedData.parts_used, 
                   updated_at: new Date() 
               })
-              .eq('id', orderId);
+              .eq('id', orderId)
+              .select(); // Returns array of updated rows
           
-          if (error) throw error;
+          if (error) {
+              console.error('[TechnicianDashboard] Update error:', error);
+              throw error;
+          }
+
+          console.log('[TechnicianDashboard] Update response:', updatedOrders);
+          
+          // Check if any rows were updated
+          if (!updatedOrders || updatedOrders.length === 0) {
+              console.error('[TechnicianDashboard] No rows updated. Possible RLS block.');
+              throw new Error('Gagal update: Tidak ada data yang berubah. Kemungkinan Anda tidak memiliki permission untuk mengedit order ini.');
+          }
+          
+          const updatedOrder = updatedOrders[0]; // Get first (should be only) result
+          console.log('[TechnicianDashboard] Update successful:', updatedOrder);
+          
+          // Verify the data actually changed
+          if (updatedOrder.notes !== updatedData.notes || updatedOrder.parts_used !== updatedData.parts_used) {
+              console.warn('[TechnicianDashboard] Data mismatch after update!', {
+                  expected: updatedData,
+                  actual: { notes: updatedOrder.notes, parts_used: updatedOrder.parts_used }
+              });
+              throw new Error('Data tidak tersimpan dengan benar. Periksa trigger database.');
+          }
 
           setToastMessage('Catatan & sparepart berhasil disimpan.');
           triggerCloseModal(); // Close the tech edit modal

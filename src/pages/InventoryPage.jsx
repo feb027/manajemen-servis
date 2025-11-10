@@ -587,10 +587,30 @@ function InventoryPage() {
 
     } catch (err) {
         console.error("Error saving inventory item:", err);
+        
+        // Translate database errors to user-friendly messages
+        let userMessage = err.message;
+        
+        // Check for duplicate SKU constraint violation
+        if (err.message && err.message.includes('duplicate key') && err.message.includes('inventory_item_code_key')) {
+          userMessage = 'SKU sudah terdaftar, silakan gunakan SKU lain.';
+        } else if (err.message && err.message.includes('duplicate key') && err.message.includes('sku')) {
+          userMessage = 'SKU sudah terdaftar, silakan gunakan SKU lain.';
+        } else if (err.code === '23505') { // PostgreSQL unique violation code
+          // Check which constraint was violated
+          if (err.message.includes('sku') || err.message.includes('item_code')) {
+            userMessage = 'SKU sudah terdaftar, silakan gunakan SKU lain.';
+          } else if (err.message.includes('name')) {
+            userMessage = 'Nama item sudah terdaftar.';
+          } else {
+            userMessage = 'Data yang Anda masukkan sudah ada di sistem.';
+          }
+        }
+        
         // Set error message for the modal (passed back via throw)
         // We also set a toast for general feedback
-        setToastMessage(`Gagal menyimpan item: ${err.message}`); 
-        throw err; // Re-throw the error so the modal can display it internally
+        setToastMessage(`Gagal menyimpan item: ${userMessage}`); 
+        throw new Error(userMessage); // Re-throw with user-friendly message so the modal can display it
     }
   };
 

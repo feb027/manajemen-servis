@@ -4,22 +4,80 @@ import { FiX, FiClock, FiUser, FiList, FiArrowRight } from 'react-icons/fi';
 import { format } from 'date-fns'; // For formatting timestamps
 import { id } from 'date-fns/locale'; // Indonesian locale
 
+// Helper to translate field names to Indonesian
+const translateFieldName = (field) => {
+  const fieldMap = {
+    'item_name': 'Nama Item',
+    'item_code': 'SKU',
+    'category': 'Kategori',
+    'description': 'Deskripsi',
+    'quantity': 'Stok',
+    'unit_price': 'Harga',
+    'created_at': 'Tanggal Dibuat',
+    'updated_at': 'Tanggal Diupdate'
+  };
+  return fieldMap[field] || field;
+};
+
+// Helper to format value nicely
+const formatValue = (value, field) => {
+  if (value === null || value === undefined) return 'kosong';
+  if (field === 'unit_price') return `Rp${parseInt(value).toLocaleString('id-ID')}`;
+  if (field === 'quantity') return `${value} unit`;
+  if (typeof value === 'string' && value.length > 50) return value.substring(0, 50) + '...';
+  return value;
+};
+
 // Helper to render changes JSONB nicely
 const renderChanges = (changes) => {
-  if (!changes || changes.length === 0) {
-    return <span className="text-gray-500 italic">N/A</span>;
+  if (!changes) {
+    return <span className="text-gray-500 italic">Tidak ada detail perubahan</span>;
   }
-  // If changes is not an array (e.g., directly the object from older trigger versions), wrap it
-  const changesArray = Array.isArray(changes) ? changes : [changes];
+  
+  // Parse JSON string if it's a string
+  let parsedChanges = changes;
+  if (typeof changes === 'string') {
+    try {
+      parsedChanges = JSON.parse(changes);
+    } catch (e) {
+      console.error('Failed to parse changes JSON:', e, changes);
+      return <span className="text-red-500 italic text-xs">Format data tidak valid</span>;
+    }
+  }
+  
+  // Handle old format (single object with field/old_value/new_value)
+  if (typeof parsedChanges === 'object' && !Array.isArray(parsedChanges) && parsedChanges.field) {
+    const change = parsedChanges;
+    return (
+      <div className="text-xs">
+        <span className="font-semibold text-gray-700">{translateFieldName(change.field)}:</span>{' '}
+        <span className="text-red-600 line-through">{formatValue(change.old_value, change.field)}</span>
+        {' '}<FiArrowRight className="inline h-3 w-3 text-gray-400" />{' '}
+        <span className="text-green-700 font-medium">{formatValue(change.new_value, change.field)}</span>
+      </div>
+    );
+  }
+  
+  // Handle even older format (object with item_id, item_name, etc - not a change detail)
+  if (typeof parsedChanges === 'object' && !Array.isArray(parsedChanges) && parsedChanges.item_id) {
+    return <span className="text-gray-500 italic text-xs">Data tersimpan tanpa detail perubahan</span>;
+  }
+  
+  // Handle new format (array of changes)
+  const changesArray = Array.isArray(parsedChanges) ? parsedChanges : [];
+  
+  if (changesArray.length === 0) {
+    return <span className="text-gray-500 italic">Tidak ada detail perubahan</span>;
+  }
 
   return (
     <ul className="space-y-1 text-xs">
       {changesArray.map((change, index) => (
         <li key={index} className="flex items-start space-x-1.5">
-          <span className="font-semibold text-gray-700 capitalize">{change.field}:</span>
-          <span className="text-red-600 line-through">{JSON.stringify(change.old_value ?? 'null')}</span>
+          <span className="font-semibold text-gray-700">{translateFieldName(change.field)}:</span>
+          <span className="text-red-600 line-through">{formatValue(change.old_value, change.field)}</span>
           <FiArrowRight className="h-3 w-3 text-gray-400 flex-shrink-0 mt-0.5" />
-          <span className="text-green-700">{JSON.stringify(change.new_value ?? 'null')}</span>
+          <span className="text-green-700 font-medium">{formatValue(change.new_value, change.field)}</span>
         </li>
       ))}
     </ul>
@@ -157,16 +215,28 @@ function InventoryHistoryModal({ isOpen, onClose, itemId, itemName }) {
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                           log.action === 'CREATE' ? 'bg-green-100 text-green-800' : 
-                           log.action === 'UPDATE' ? 'bg-yellow-100 text-yellow-800' : 
-                           log.action === 'DELETE' ? 'bg-red-100 text-red-800' : 
+                           log.action === 'CREATE' || log.action === 'ITEM_CREATED' ? 'bg-green-100 text-green-800' : 
+                           log.action === 'UPDATE' || log.action === 'ITEM_UPDATED' ? 'bg-yellow-100 text-yellow-800' : 
+                           log.action === 'DELETE' || log.action === 'ITEM_DELETED' ? 'bg-red-100 text-red-800' : 
+                           log.action === 'STOCK_ADJUSTMENT' ? 'bg-blue-100 text-blue-800' :
                            'bg-gray-100 text-gray-800' // Fallback
                        }`}>
-                           {log.action}
+                           {log.action === 'CREATE' || log.action === 'ITEM_CREATED' ? 'Dibuat' : 
+                            log.action === 'UPDATE' || log.action === 'ITEM_UPDATED' ? 'Diubah' : 
+                            log.action === 'DELETE' || log.action === 'ITEM_DELETED' ? 'Dihapus' :
+                            log.action === 'STOCK_ADJUSTMENT' ? 'Penyesuaian Stok' :
+                            log.action}
                        </span>
                     </td>
                     <td className="px-4 py-2">
-                      {log.action === 'UPDATE' ? renderChanges(log.changes) : <span className="text-gray-500 italic">N/A</span>}
+                      {log.action === 'UPDATE' || log.action === 'ITEM_UPDATED' || log.action === 'STOCK_ADJUSTMENT' ? 
+                        renderChanges(log.changes) : 
+                        log.action === 'CREATE' || log.action === 'ITEM_CREATED' ? 
+                          <span className="text-green-600 text-xs italic">Item baru ditambahkan</span> :
+                        log.action === 'DELETE' || log.action === 'ITEM_DELETED' ? 
+                          <span className="text-red-600 text-xs italic">Item dihapus dari sistem</span> :
+                        <span className="text-gray-500 italic">Tidak ada detail</span>
+                      }
                     </td>
                   </tr>
                 ))}

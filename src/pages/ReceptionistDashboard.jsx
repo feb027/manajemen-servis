@@ -438,16 +438,29 @@ function ReceptionistDashboard() {
     const orderIdToDelete = orderToDelete.id;
     console.log(`Attempting to delete order ${orderIdToDelete}`);
     try {
-      const { error: logError } = await supabase
-        .from('service_order_logs')
+      // Delete from the actual backup table (service_order_logs is just a view)
+      const { error: logBackupError } = await supabase
+        .from('service_order_logs_backup')
         .delete()
         .eq('service_order_id', orderIdToDelete);
         
-      if (logError) {
-        console.error("Error deleting related service order logs:", logError);
-        throw new Error(`Gagal menghapus log terkait: ${logError.message}`); 
+      if (logBackupError) {
+        console.error("Error deleting related service order logs backup:", logBackupError);
+        throw new Error(`Gagal menghapus log terkait: ${logBackupError.message}`); 
       }
-      console.log(`Successfully deleted logs for order ${orderIdToDelete}`);
+      console.log(`Successfully deleted logs backup for order ${orderIdToDelete}`);
+
+      // Also delete from activity_logs where entity_type is service_order
+      const { error: activityLogError } = await supabase
+        .from('activity_logs')
+        .delete()
+        .eq('entity_id', orderIdToDelete)
+        .eq('entity_type', 'service_order');
+        
+      if (activityLogError) {
+        console.error("Error deleting related activity logs:", activityLogError);
+        // Don't throw here, just log - activity logs might not exist
+      }
 
       const { error: deleteError } = await supabase
         .from('service_orders')

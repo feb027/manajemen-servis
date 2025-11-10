@@ -183,7 +183,40 @@ function ServiceOrderDetailModal({ order: initialOrder, technicians = [], onClos
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [initialOrder?.id]); // eslint-disable-line react-hooks/exhaustive-deps 
+  }, [initialOrder?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  
+  // REALTIME SUBSCRIPTION - Auto refresh when order is updated
+  useEffect(() => {
+    if (!order?.id) return;
+    
+    console.log('[ServiceOrderDetailModal] Setting up realtime subscription for order:', order.id);
+    
+    const channel = supabase
+      .channel(`order-${order.id}-changes`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'service_orders',
+          filter: `id=eq.${order.id}`
+        },
+        (payload) => {
+          console.log('[ServiceOrderDetailModal] Realtime UPDATE received:', payload);
+          // Update local state with new data
+          setOrder(payload.new);
+        }
+      )
+      .subscribe((status) => {
+        console.log('[ServiceOrderDetailModal] Subscription status:', status);
+      });
+    
+    // Cleanup subscription on unmount
+    return () => {
+      console.log('[ServiceOrderDetailModal] Removing realtime subscription');
+      supabase.removeChannel(channel);
+    };
+  }, [order?.id]); // Re-subscribe if order ID changes 
 
   // ... handlePrint hook ...
   const handlePrint = useReactToPrint({
