@@ -84,7 +84,49 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
      setError(null);
   };
 
+  // Validate contact input (phone or email)
+  const validateContact = (contact) => {
+    if (!contact || !contact.trim()) {
+      return { valid: false, message: "Kontak tidak boleh kosong" };
+    }
+    
+    const trimmedContact = contact.trim();
+    
+    // Check if it's an email
+    if (trimmedContact.includes('@')) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedContact)) {
+        return { valid: false, message: "Format email tidak valid" };
+      }
+      return { valid: true, isEmail: true, value: trimmedContact };
+    }
+    
+    // Check if it's a phone number (only digits, minimum 10 digits)
+    const phoneRegex = /^[0-9]{10,15}$/;
+    if (!phoneRegex.test(trimmedContact)) {
+      return { 
+        valid: false, 
+        message: "Nomor telepon harus berisi 10-15 digit angka tanpa spasi atau karakter khusus" 
+      };
+    }
+    
+    return { valid: true, isEmail: false, value: trimmedContact };
+  };
+
   const handleDurationChange = (hours) => {
+    // Validate that hours is a positive number
+    if (hours !== '' && hours !== null) {
+      const numHours = parseFloat(hours);
+      if (isNaN(numHours) || numHours < 0) {
+        setError("Estimasi waktu pengerjaan harus berupa angka positif");
+        return;
+      }
+      // Allow decimal values (e.g., 4.5 hours)
+      if (numHours > 1000) {
+        setError("Estimasi waktu pengerjaan terlalu besar (maksimal 1000 jam)");
+        return;
+      }
+    }
     setFormData(prevData => ({ ...prevData, estimatedDurationHours: hours }));
   };
 
@@ -117,17 +159,21 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
             if (!newCustomerData.newCustomerName.trim()) {
                 throw new Error("Nama pelanggan baru tidak boleh kosong.");
             }
-            const contact = newCustomerData.newCustomerContact.trim();
-            if (!contact) {
-                 throw new Error("Kontak pelanggan baru tidak boleh kosong.");
+            
+            // Validate contact using the validation function
+            const contactValidation = validateContact(newCustomerData.newCustomerContact);
+            if (!contactValidation.valid) {
+                throw new Error(contactValidation.message);
             }
 
-            const isEmail = contact.includes('@');
+            const { isEmail, value: validatedContact } = contactValidation;
+
+            // Check if customer already exists
             let existingCustomerQuery = supabase.from('customers');
             if (isEmail) {
-                 existingCustomerQuery = existingCustomerQuery.select('id, full_name').eq('email', contact);
+                 existingCustomerQuery = existingCustomerQuery.select('id, full_name').eq('email', validatedContact);
             } else {
-                 existingCustomerQuery = existingCustomerQuery.select('id, full_name').eq('phone_number', contact);
+                 existingCustomerQuery = existingCustomerQuery.select('id, full_name').eq('phone_number', validatedContact);
             }
              const { data: existingCustomers, error: queryError } = await existingCustomerQuery.maybeSingle();
 
@@ -145,15 +191,22 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
                 .from('customers')
                 .insert({
                     full_name: newCustomerData.newCustomerName.trim(),
-                    phone_number: isEmail ? null : contact,
-                    email: isEmail ? contact : null,
+                    phone_number: isEmail ? null : validatedContact,
+                    email: isEmail ? validatedContact : null,
                 })
                 .select('id')
                 .single();
 
             if (insertCustomerError) {
                 console.error("Supabase customer insert error:", insertCustomerError);
-                throw new Error(`Gagal menambahkan pelanggan baru: ${insertCustomerError.message}`);
+                // Provide user-friendly error messages
+                let errorMessage = "Gagal menambahkan pelanggan baru";
+                if (insertCustomerError.code === '23505') {
+                    errorMessage = "Kontak pelanggan sudah terdaftar. Silakan gunakan kontak yang berbeda atau pilih dari daftar.";
+                } else if (insertCustomerError.message) {
+                    errorMessage = `Gagal menambahkan pelanggan: ${insertCustomerError.message}`;
+                }
+                throw new Error(errorMessage);
             }
 
             if (!newCustomer || !newCustomer.id) {
@@ -206,6 +259,19 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
              throw new Error("Keluhan pelanggan harus diisi.");
          }
 
+        // Validate estimated duration hours if provided
+        let validatedDurationHours = null;
+        if (formData.estimatedDurationHours !== '' && formData.estimatedDurationHours !== null) {
+            const durationNum = parseFloat(formData.estimatedDurationHours);
+            if (isNaN(durationNum) || durationNum < 0) {
+                throw new Error("Estimasi waktu pengerjaan harus berupa angka positif (contoh: 2 atau 4.5)");
+            }
+            if (durationNum > 1000) {
+                throw new Error("Estimasi waktu pengerjaan terlalu besar (maksimal 1000 jam)");
+            }
+            validatedDurationHours = durationNum;
+        }
+
         const serviceOrderData = {
             customer_id: customerIdToUse,
             customer_name: finalCustomerName,
@@ -215,7 +281,7 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
             serial_number: formData.serialNumber || null,
             customer_complaint: formData.customerComplaint,
             cost: formData.cost === '' ? null : Number(formData.cost),
-            estimated_duration_hours: formData.estimatedDurationHours === '' ? null : Number(formData.estimatedDurationHours),
+            estimated_duration_hours: validatedDurationHours,
             estimated_completion_time: formData.estimatedCompletionTime || null,
         };
 
@@ -226,7 +292,21 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
 
         if (insertServiceError) {
             console.error("Supabase service order insert error:", insertServiceError);
-            throw new Error(`Gagal menyimpan order servis: ${insertServiceError.message}`);
+            
+            // Provide user-friendly error messages
+            let errorMessage = "Gagal menyimpan order servis";
+            
+            if (insertServiceError.code === '23505') {
+                errorMessage = "Data order sudah ada. Silakan periksa kembali.";
+            } else if (insertServiceError.message.includes('invalid input syntax for type integer')) {
+                errorMessage = "Format data tidak valid. Pastikan nomor telepon hanya berisi angka dan estimasi waktu dalam format yang benar.";
+            } else if (insertServiceError.message.includes('invalid input syntax for type numeric')) {
+                errorMessage = "Format angka tidak valid. Pastikan biaya dan estimasi waktu diisi dengan benar (contoh: 100000 atau 4.5).";
+            } else if (insertServiceError.message) {
+                errorMessage = `Gagal menyimpan order servis: ${insertServiceError.message}`;
+            }
+            
+            throw new Error(errorMessage);
         }
 
         console.log('Service order berhasil disimpan.');
@@ -358,11 +438,29 @@ function ServiceOrderForm({ onOrderAdded, onClose }) {
                                 </div>
                              </div>
                              <div>
-                                 <label htmlFor="newCustomerContact" className="block text-xs font-medium text-gray-600 mb-1">Kontak (Telepon / Email)</label>
+                                 <label htmlFor="newCustomerContact" className="block text-xs font-medium text-gray-600 mb-1">
+                                    Kontak (Telepon / Email)
+                                    <span className="ml-1 text-xs text-gray-500 font-normal">
+                                        - Contoh: 081234567890 atau email@domain.com
+                                    </span>
+                                 </label>
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><FiPhone className="h-4 w-4 text-gray-400" /></div>
-                                    <input type="text" id="newCustomerContact" name="newCustomerContact" value={newCustomerData.newCustomerContact} onChange={handleNewCustomerChange} required={isAddingNewCustomer} disabled={isLoading} className="block w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-[#0ea5e9] focus:border-[#0ea5e9]" placeholder="Nomor Telepon atau Email"/>
+                                    <input 
+                                        type="text" 
+                                        id="newCustomerContact" 
+                                        name="newCustomerContact" 
+                                        value={newCustomerData.newCustomerContact} 
+                                        onChange={handleNewCustomerChange} 
+                                        required={isAddingNewCustomer} 
+                                        disabled={isLoading} 
+                                        className="block w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-[#0ea5e9] focus:border-[#0ea5e9]" 
+                                        placeholder="08123456789 atau email@domain.com"
+                                    />
                                 </div>
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Masukkan nomor telepon (10-15 digit angka) atau alamat email yang valid
+                                </p>
                              </div>
                         </div>
                     )}

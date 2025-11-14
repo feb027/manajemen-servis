@@ -125,7 +125,7 @@ serve(async (req)=>{
 
     // 9. Return Success Response
     return new Response(JSON.stringify({
-        message: 'User created and confirmed successfully!',
+        message: 'User Berhasil dibuat dan telah dikonfirmasi!',
         userId: newUserId
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

@@ -33,7 +33,7 @@ function TimeEstimationInput({
         <div>
           <label htmlFor="estimatedDurationHours" className="block text-sm font-medium text-gray-700 mb-1">
             Estimasi Durasi Pengerjaan (Jam)
-            <span className="text-xs text-gray-500 ml-1">(Opsional)</span>
+            <span className="text-xs text-gray-500 ml-1">(Opsional - dapat menggunakan desimal)</span>
           </label>
           <div className="relative rounded-md shadow-sm">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -53,7 +53,7 @@ function TimeEstimationInput({
             />
           </div>
           <p className="mt-1 text-xs text-gray-500">
-            Perkiraan waktu yang dibutuhkan untuk menyelesaikan servis
+            Perkiraan waktu yang dibutuhkan (mendukung desimal, contoh: 2.5 jam = 2 jam 30 menit)
           </p>
         </div>
 
